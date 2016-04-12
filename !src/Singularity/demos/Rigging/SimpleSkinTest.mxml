@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" applicationComplete="test()" width="600" height="500">
+  <mx:TextArea height="32" id="__status__" wordWrap="true" editable="false" top="10" left="23" right="22"/>
+  <mx:Button x="23" y="468" label="Standard Bone" id="__standard__" enabled="false" click="onStandard()"/>
+  <mx:Button x="150" y="468" label="Point-To-Point" id="__point__" enabled="false" click="onPoint()"/>
+  <mx:Button x="273" y="468" label="Cubic Spline" id="__spline__" enabled="false" click="onSpline()"/>
+	
+	<mx:Script>
+    <![CDATA[
+      import Singularity.Numeric.Consts;
+      
+      import Singularity.Rigs.Bone;
+      import Singularity.Rigs.Chain;
+      import Singularity.Rigs.Template;
+      
+      import flash.display.Sprite;
+      import flash.events.MouseEvent;
+      import flash.events.KeyboardEvent;
+      import flash.ui.Keyboard;
+      
+      import mx.controls.sliderClasses.Slider;
+      import mx.core.UIComponent;
+      import mx.events.SliderEvent;
+ 
+      // bone (bn) namespace
+      public namespace bn;
+      
+      bn var __count:uint              = 0;                  // point counter
+      bn var __bone:Bone               = null;               // reference to a single bone
+      bn var __chain:Chain             = new Chain();        // primary bone chain
+      bn var __template:Template       = new Template();     // custom bone template
+      bn var __isTerminated:Boolean    = false;              // true when chain is terminated
+
+      bn var __myReference:UIComponent = new UIComponent();  // UIComponent reference
+      
+      // user-interface (ui) namespace
+      public namespace ui;
+      ui var __stage:Stage  = null;
+      ui var __track:Sprite = new Sprite();
+      
+      public function test():void 
+      { 
+      	addChild(bn::__myReference);
+        bn::__myReference.addChild(bn::__chain);
+        bn::__myReference.addChild(ui::__track);
+        
+        ui::__stage = ui::__track.stage;
+        
+        // define drawing area 
+        var drawY:uint = __status__.y + __status__.height + 5;
+        var drawH:uint = __standard__.y - drawY - 10;
+        
+        var g:Graphics = ui::__track.graphics;
+        g.lineStyle(1,0xffffff,.2);
+        g.beginFill(0xffffff,.2);
+        g.drawRect(0,drawY,ui::__stage.width,drawH);
+
+        ui::__track.addEventListener(MouseEvent.CLICK, onSelected);
+        ui::__stage.addEventListener(KeyboardEvent.KEY_DOWN, terminate);
+        
+        // use the same custom template for all bones
+        bn::__template = new Template();
+        bn::__template.insert(0,5);
+        bn::__template.insert(10,8);
+        bn::__template.insert(90,8);
+        bn::__template.insert(96,5);
+        
+        __status__.text = "Click anywhere to start drawing a bone.  New clicks create new bones.  Click SPACE BAR to end the chain";
+      }
+      
+      public function errHandler(_e:Event):void
+      {
+      	__status__.text = _e.toString();
+      }
+      
+      public function trackMouse(_e:MouseEvent):void
+      {     	
+        bn::__bone.setTerminal(_e.localX,_e.localY);  
+      	bn::__bone.draw();	
+      }
+      
+      // note that Bone Templates must be assigned after the Bone is drawn as they are scaled based on the Bone's length
+      public function onSelected(_e:MouseEvent):void
+      {
+      	var pX:uint = _e.localX;
+      	var pY:uint = _e.localY;
+     	
+     	// do not start new chains if one has already been terminated
+     	if( !bn::__isTerminated )
+     	{
+      	  if( bn::__count == 0 )
+      	  {
+      	    bn::__bone      = bn::__chain.createBone();      // newly created bone is now in display list
+      	    bn::__bone.NAME = "Bone"+bn::__count.toString();
+      	    bn::__bone.ID   = bn::__count;
+      	  
+      	    // completely turn off all internal mouse events until chain is completed
+      	    bn::__bone.disableMouseEvents();
+      	      
+      	    // initial joint coordinates
+      	    bn::__bone.setInitial(pX, pY);
+      	    bn::__isTerminated = false;
+      	      
+            ui::__track.addEventListener(MouseEvent.MOUSE_MOVE, trackMouse);
+          }
+          else
+          {
+            ui::__track.removeEventListener(MouseEvent.MOUSE_MOVE, trackMouse);
+              
+            // terminate current bone
+      	    bn::__bone.setTerminal(pX, pY);
+      	    
+      	    // assign Template to Bone (although it's drawn as a standard bone by default)
+      	    bn::__bone.setTemplate(bn::__template,false);
+      	    bn::__bone.draw();
+
+      	    // begin new bone
+      	    bn::__bone         = bn::__chain.createBone();      // newly created bone is now in display list
+      	    bn::__bone.NAME    = "Bone"+bn::__count.toString();
+      	    bn::__bone.ID      = bn::__count;
+      	    
+      	    // assign Template to Bone
+      	    bn::__bone.setTemplate(bn::__template,false);
+      	   
+      	    bn::__bone.disableMouseEvents();
+      	    bn::__bone.setInitial(pX, pY);
+      	      
+            ui::__track.addEventListener(MouseEvent.MOUSE_MOVE, trackMouse);
+      	  }
+          bn::__count++;
+        }
+      }
+      
+      // terminate the chain
+      public function terminate(_e:KeyboardEvent):void
+      {
+      	if( _e.charCode == flash.ui.Keyboard.SPACE && !bn::__isTerminated )
+      	{
+          bn::__isTerminated = true;
+      	  ui::__track.removeEventListener(MouseEvent.MOUSE_MOVE, trackMouse);
+      	  ui::__track.removeEventListener(MouseEvent.CLICK, onSelected);
+      	  ui::__track.visible = false;
+      	  
+      	  // currently drawn bone is invalid
+          bn::__chain.pop();
+      	  
+      	  __point__.enabled  = true;
+      	  __spline__.enabled = true;
+        }
+      }
+      
+      // select custom skin - point-to-point drawing
+      public function onPoint():void
+      {
+        __point__.enabled    = false;
+      	__spline__.enabled   = true;
+      	__standard__.enabled = true;
+      	
+      	// set drawing type to custom
+      	bn::__chain.drawType = Bone.CUSTOM;
+      	
+      	// no spline interpolation on Template points
+      	bn::__chain.splineInterpolation = false;
+      	
+      	// redraw the chain
+      	bn::__chain.draw();
+      }
+      
+      // custom skin - spline interpolation
+      public function onSpline():void
+      {
+      	__point__.enabled    = true;
+      	__spline__.enabled   = false;
+      	__standard__.enabled = true;
+      	
+      	// set drawing type to custom
+      	bn::__chain.drawType = Bone.CUSTOM;
+      	
+      	// allow spline interpolation on Template points
+      	bn::__chain.splineInterpolation = true;
+      	
+      	// redraw the chain
+      	bn::__chain.draw();
+      }
+      
+      // select standard bone drawing
+      public function onStandard():void
+      {
+      	__point__.enabled    = true;
+      	__spline__.enabled   = true;
+      	__standard__.enabled = false;
+      	
+      	// set drawing type to standard
+      	bn::__chain.drawType = Bone.STANDARD;
+      	
+      	// redraw the chain
+      	bn::__chain.draw();
+      }
+    ]]>
+  </mx:Script>
+
+	
+</mx:Application>

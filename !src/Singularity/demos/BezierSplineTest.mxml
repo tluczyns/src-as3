@@ -1,0 +1,216 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" applicationComplete="test()" width="600" height="500">
+  <mx:TextArea height="26" id="__status__" wordWrap="true" editable="false" top="10" left="23" right="22"/>
+  <mx:Button x="141" y="468" label="Move" id="__move__" enabled="false" click="onMove()"/>
+  <mx:Button x="208" y="468" label="Reset" id="__reset__" enabled="false" click="onReset()"/>
+  <mx:Button x="23" y="468" label="Draw" id="__draw__" enabled="true" click="onDraw()"/>
+	
+	<mx:Script>
+    <![CDATA[
+      import Singularity.Geom.BezierSpline;
+      import Singularity.Geom.Knot;
+     
+      import Singularity.Events.SingularityEvent;
+
+      import Singularity.Interactive.PointSelector;
+      
+      import mx.core.UIComponent;
+      
+      import flash.display.Shape;
+      import flash.display.Sprite;
+      
+      // bezier spline (bzs) namespace
+      public namespace bzs;
+      
+      bzs var NORMAL:String             = "N";
+      bzs var MOVE:String               = "M";
+      
+      bzs var __mode:String             = bzs::NORMAL;        // current mode
+      bzs var __spline:BezierSpline     = new BezierSpline(); // cubic bezier spline reference
+      bzs var __count:uint              = 0;                  // count number of control points
+      bzs var __selected:uint           = 0;                  // index of selected control point
+      bzs var __knots:Array             = new Array();        // collection of Knot references
+      bzs var __controlPoints:Array     = new Array();        // collection of control-point coordinates
+      bzs var __connect:Shape           = new Shape();        // lines connecting the control points
+      bzs var __curve:Shape             = new Shape();        // bezier curve drawn in this Shape
+      bzs var __drawArea:PointSelector  = null;               // reference to point-selector
+      bzs var __myReference:UIComponent = new UIComponent();  // UIComponent reference
+      
+      public function test():void 
+      { 
+      	addChild(bzs::__myReference);
+      	        
+        bzs::__spline.addEventListener(SingularityEvent.ERROR, errHandler);
+        bzs::__spline.container = bzs::__curve;
+        
+        // define drawing area - use top of normal button for bottom level
+        var drawX:uint = __status__.x;
+        var drawY:uint = __status__.y + __status__.height + 5;
+        var drawW:uint = __status__.width;
+        var drawH:uint = __draw__.y - drawY - 10;
+        
+        bzs::__drawArea = new PointSelector(drawX, drawY, drawW, drawH, 0xcccccc);
+        bzs::__drawArea.addEventListener(SingularityEvent.SELECTED, onSelected);
+          
+        bzs::__myReference.addChild(bzs::__drawArea);
+        bzs::__myReference.addChild(bzs::__curve);
+        bzs::__myReference.addChild(bzs::__connect);
+        
+        __status__.text = "Click in draw area to select knots, then click 'Draw' to plot draw the cubic bezier spline";
+      }
+      
+      public function errHandler(_e:Event):void
+      {
+      	__status__.text = _e.toString();
+      }
+      
+      public function onKnotRollOver(_e:Event):void
+      {
+        __status__.text = "Knot: " + _e.target.id;
+      }
+      
+      public function onKnotRollOut(_e:SingularityEvent):void
+      {
+      	if( bzs::__mode == bzs::NORMAL )
+      	  __status__.text = "Cubic Bezier Spline drawn with selected control points.  Move control point or reset";
+      	else if ( bzs::__mode == bzs::MOVE )
+      	  __status__.text = "Selected control point: " + bzs::__selected + ".  Click in draw area to move control point";
+      	else
+      	  __status__.text = "";
+      }
+      
+      public function onKnotSelected(_e:Event):void
+      {
+      	if( bzs::__mode == bzs::MOVE )
+      	{
+          __status__.text = "Selected control point: " + bzs::__selected + ".  Click in draw area to move control point";
+      	  var k:Knot      = Knot(_e.target);
+      	  bzs::__selected = k.id;
+
+      	  bzs::__drawArea.enableXHair();
+      	
+      	  k.color(0xff0000);
+      	}
+      }
+      
+      public function onSelected(_e:SingularityEvent):void
+      {
+      	var p:PointSelector = PointSelector(_e.target);
+      	
+      	var pX:uint = p.selectedX;
+      	var pY:uint = p.selectedY;
+      	
+      	// process move mode first
+      	if( bzs::__mode == bzs::MOVE )
+        {
+          bzs::__drawArea.disableXHair();
+              
+          // move the control point and then update the curve based on previous mode
+          bzs::__spline.moveControlPoint(bzs::__selected, pX, pY);
+          var k:Knot    = bzs::__knots[bzs::__selected];
+          var pt:Object = bzs::__controlPoints[bzs::__selected];
+          pt.X          = pX;
+          pt.Y          = pY;
+          k.x           = pX;
+          k.y           = pY;
+          k.resetColor();
+          
+          connectKnots();
+          
+          bzs::__curve.graphics.clear();
+          bzs::__spline.draw();
+          bzs::__mode = bzs::NORMAL;
+        }
+        else
+      	{                 
+          var knot:Knot = new Knot(6, 0xffcccc);
+          knot.addEventListener( SingularityEvent.ROLL_OVER, onKnotRollOver );
+          knot.addEventListener( SingularityEvent.ROLL_OUT , onKnotRollOut  );
+          knot.addEventListener( SingularityEvent.SELECTED , onKnotSelected );
+        
+          bzs::__spline.addControlPoint(pX,pY);
+          bzs::__knots.push(knot);
+        
+          knot.id = bzs::__count++;
+          knot.x  = pX;
+          knot.y  = pY;
+        
+          bzs::__myReference.addChild(knot);
+        
+          // add point to knot collection
+          bzs::__controlPoints.push( {X:pX, Y:pY} );
+        }
+      }
+     
+      public function onDraw():void
+      {
+      	connectKnots();
+      	
+      	bzs::__drawArea.disableXHair();
+            
+        bzs::__spline.draw();
+            
+        __move__.enabled  = true;
+        __reset__.enabled = true;
+        __draw__.enabled  = false;
+      }
+      
+      public function connectKnots():void
+      {
+      	var g:Graphics = bzs::__connect.graphics;
+      	g.clear();
+      	g.lineStyle(0,0x000000);
+      	var p:Object = bzs::__controlPoints[0];
+      	g.moveTo(p.X, p.Y);
+      	
+      	for( var i:uint=1; i<bzs::__count; ++i )
+      	{
+          p = bzs::__controlPoints[i];
+      	  g.lineTo(p.X, p.Y);
+      	}
+      }
+      
+      public function onMove():void
+      {
+      	bzs::__mode = bzs::MOVE;
+      	
+      	__status__.text = "Move - Select control point.";
+      }
+      
+      public function onReset():void
+      {
+      	// restore the application to its initial state, preparing for new control points
+      	__move__.enabled  = false;
+      	__reset__.enabled = false;
+      	__draw__.enabled  = true;
+      	
+      	__status__.text = "Click in draw area to select knots, then click 'Draw' to plot draw the cubic Bezier spline";
+      	
+        bzs::__curve.graphics.clear();
+        bzs::__connect.graphics.clear();
+        bzs::__spline.reset();
+        
+        for( var i:uint=0; i<bzs::__count; ++i )
+        {
+          bzs::__knots[i].destruct();
+          delete bzs::__knots[i];
+          
+          delete bzs::__controlPoints[i];
+        }
+        
+        bzs::__controlPoints.splice(0);
+        bzs::__knots.splice(0);
+        
+        bzs::__mode     = bzs::NORMAL;
+        bzs::__count    = 0;
+        bzs::__selected = 0;
+        
+        bzs::__drawArea.enableXHair();
+      }
+    ]]>
+  </mx:Script>
+	
+</mx:Application>
+
+
+

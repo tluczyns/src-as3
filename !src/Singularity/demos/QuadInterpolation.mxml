@@ -1,0 +1,229 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" applicationComplete="test()" width="600" height="500">
+  <mx:TextArea height="26" id="__status__" wordWrap="true" editable="false" top="10" left="23" right="22"/>
+  <mx:Button x="102" y="468" label="Reset" id="__reset__" click="onReset()" enabled="false"/>
+  <mx:HSlider x="377" y="470" id="__param__" allowTrackClick="false" minimum="0.2" maximum="0.8" enabled="false" thumbRelease="onSliderRelease()" change="onValueChange(event)" liveDragging="true"/>
+  <mx:Label x="209" y="472" text="Parameter Value" width="160" color="#ffffff" id="__label__"/>
+  
+	<mx:Script>
+    <![CDATA[
+    
+      // This program illustrates the difference between a uniform and arc-length parameterization on a closed Bezier spline.
+      // Spline closure is automatic.  No need to manually connect knots
+      
+      // The spline is drawn once, but two copies of the curve are used.  The first uses a uniform parameterization and the second
+      // uses arc-length parameterization.  Two sprites are animated around the curve.
+      
+      import Singularity.Events.SingularityEvent;
+            
+      import Singularity.Geom.Bezier2;
+      import Singularity.Geom.Knot;
+     
+      import Singularity.Numeric.Consts;
+
+      import Singularity.Interactive.PointSelector;
+      
+      import mx.controls.sliderClasses.Slider;
+      import mx.core.UIComponent;
+      import mx.events.SliderEvent;
+      
+      import flash.display.Shape;
+      import flash.display.Sprite;
+      
+      // bezier (bz) namespace
+      public namespace bz;
+      bz var __quad:Bezier2           = new Bezier2();       // quad bezier - chord-length paramerization
+      bz var __count:uint             = 0;                   // count number of control points
+      bz var __knots:Array            = new Array();         // collection of spline Knot references
+      bz var __points:Array           = new Array();         // points for input to Bezier2 intperpolate method
+      
+      // ui namespace
+      public namespace ui;
+      ui var __connect:Shape           = new Shape();        // lines connecting the control points
+      ui var __midpoint:Shape          = new Shape();        // midpoint-parameterized quad. bezier drawn here
+      ui var __chord:Shape             = new Shape();        // chord-length parameterization quad. bezier drawn here
+      ui var __user:Shape              = new Shape();        // user-specified parameterization quad. bezier drawn here
+      ui var __knots:Sprite            = new Sprite();       // draw original knots
+  
+      ui var __drawArea:PointSelector  = null;               // reference to point-selector
+      ui var __myReference:UIComponent = new UIComponent();  // UIComponent reference
+      
+      public function test():void 
+      { 
+      	addChild(ui::__myReference);
+        
+        bz::__quad.addEventListener(SingularityEvent.ERROR, errHandler);
+        bz::__quad.container = ui::__chord;
+        
+        // define drawing area - use top of normal button for bottom level
+        var drawX:uint = __status__.x;
+        var drawY:uint = __status__.y + __status__.height + 5;
+        var drawW:uint = __status__.width;
+        var drawH:uint = __reset__.y - drawY - 15;
+        
+        ui::__drawArea = new PointSelector(drawX, drawY, drawW, drawH, 0xcccccc);
+        ui::__drawArea.addEventListener(SingularityEvent.SELECTED, onSelected);
+          
+        ui::__myReference.addChild(ui::__drawArea);
+        ui::__myReference.addChild(ui::__connect);
+        ui::__myReference.addChild(ui::__midpoint);
+        ui::__myReference.addChild(ui::__chord);
+        ui::__myReference.addChild(ui::__user);
+        ui::__myReference.addChild(ui::__knots);
+        
+        __status__.text = "Click in draw area to select three points";
+      }
+      
+      public function errHandler(_e:Event):void
+      {
+      	__status__.text = _e.toString();
+      }
+      
+      public function onKnotRollOver(_e:Event):void
+      {
+        __status__.text = "Knot: " + _e.target.id;
+      }
+      
+      public function onKnotRollOut(_e:SingularityEvent):void
+      {
+      	// no action
+      }
+      
+      public function onKnotSelected(_e:Event):void
+      {
+      	// no action currently taken
+      }
+      
+      public function onSelected(_e:SingularityEvent):void
+      {
+      	var p:PointSelector = PointSelector(_e.target);
+      	
+      	var pX:uint = p.selectedX;
+      	var pY:uint = p.selectedY;
+      	          
+        var knot:Knot = new Knot(6, 0xffcccc);
+        knot.addEventListener( SingularityEvent.ROLL_OVER, onKnotRollOver );
+        knot.addEventListener( SingularityEvent.ROLL_OUT , onKnotRollOut  );
+        knot.addEventListener( SingularityEvent.SELECTED , onKnotSelected );
+        
+        bz::__knots.push(knot);
+        bz::__points[bz::__count] = {X:pX, Y:pY};
+        
+        knot.id = bz::__count++;
+        knot.x  = pX;
+        knot.y  = pY;
+        
+        ui::__knots.addChild(knot);
+        
+        if( bz::__knots.length == 3 )
+        {
+      	  connectKnots();
+          ui::__drawArea.disableXHair();
+          
+          // midpoint parameterization for midpoint curve and beginning of user-specified parameterization  
+          var cX:Number = 2.0*bz::__knots[1].x - 0.5*(bz::__knots[0].x + bz::__knots[2].x);
+          var cY:Number = 2.0*bz::__knots[1].y - 0.5*(bz::__knots[0].y + bz::__knots[2].y);
+
+          var g:Graphics = ui::__midpoint.graphics;
+          g.lineStyle(0, 0xff0000, 1);
+          g.moveTo(bz::__knots[0].x, bz::__knots[0].y);
+          g.curveTo(cX, cY, bz::__knots[2].x, bz::__knots[2].y);
+          
+          // chord-length parameterization (default for Bezier2 class)
+          bz::__quad.interpolate(bz::__points);
+          bz::__quad.color = 0xffff00;
+          bz::__quad.draw(1.0);
+          
+          __param__.value = 0.5;
+          interpolate(0.5);
+          
+          __status__.text   = "Move slider to change parameterization for interpolation";
+          __param__.enabled = true;
+        }
+      }
+      
+      // interpolate three points with second point at specified parameter value
+      public function interpolate(_t:Number):void
+      {
+      	var t1:Number    = 1.0-_t;
+        var tSq:Number   = _t*_t;
+        var denom:Number = 2.0*_t*t1;
+
+        var cX:Number = (bz::__points[1].X - t1*t1*bz::__points[0].X - tSq*bz::__points[2].X)/denom;
+        var cY:Number = (bz::__points[1].Y - t1*t1*bz::__points[0].Y - tSq*bz::__points[2].Y)/denom;
+        
+        var g:Graphics = ui::__user.graphics;
+        g.clear();
+        g.lineStyle(0, 0x0000ff, 1);
+        g.moveTo(bz::__knots[0].x, bz::__knots[0].y);
+        g.curveTo(cX, cY, bz::__knots[2].x, bz::__knots[2].y);
+      }
+      
+      public function connectKnots():void
+      {
+      	var g:Graphics = ui::__connect.graphics;
+      	g.clear();
+      	g.lineStyle(0,0x000000);
+      	var k:Knot = bz::__knots[0];
+      	g.moveTo(k.x, k.y);
+      	
+      	for( var i:uint=1; i<bz::__count; ++i )
+      	{
+          k = bz::__knots[i];
+      	  g.lineTo(k.x, k.y);
+      	}
+      }
+      
+      // process orientation changes from the slider
+      public function onValueChange(_e:SliderEvent):void
+      {
+        var t:Number = __param__.value;
+        interpolate(t);
+      }
+      
+      public function onSliderRelease():void
+      {
+        __label__.text    = "t = " + __param__.value;
+        __reset__.enabled = true;
+      }
+      
+      public function onReset():void
+      {
+        __reset__.enabled = false;
+        
+        var g:Graphics = ui::__midpoint.graphics;
+        g.clear();
+        
+        g = ui::__user.graphics;
+        g.clear();
+        
+        g = ui::__chord.graphics;
+        g.clear();
+        
+        // Completely clean out the knot set, preparing for a new set
+        var knots:uint = bz::__knots.length;
+        for( var i:uint=0; i<knots; ++i )
+        {
+          var k:Knot = bz::__knots[i];
+          k.destruct();
+          
+          ui::__knots.removeChild(k);
+          delete bz::__points[i];
+        }
+        
+        bz::__knots.splice(0);
+        bz::__points.splice(0);
+        g = ui::__connect.graphics;
+        g.clear();
+        
+        
+        bz::__count = 0;
+        ui::__drawArea.enableXHair();
+        
+        __status__.text = "Click in draw area to select three points";
+      }
+    ]]>
+  </mx:Script>
+	
+</mx:Application>
+

@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" applicationComplete="test()" width="600" height="500">
+  <mx:TextArea height="26" id="__status__" wordWrap="true" editable="false" top="10" left="23" right="22"/>
+  <mx:Button x="221" y="472" label="Reset" id="__reset__" enabled="false" click="onReset()"/>
+  <mx:Button x="320" y="472" label="Select x" id="__select__" click="onSelectX()" enabled="false"/>
+  <mx:Label y="453" text="Draw curve and select x-value" width="200" color="#ffffff" textAlign="center" horizontalCenter="4"/>
+	
+	<mx:Script>
+    <![CDATA[
+    
+      // This program illustrates the quadratic Bezier yAtX() method.  Draw a quad. Bezier with three control points, then click
+      // anywhere within the x-extend of the curve to define an x-value.  Markers are placed at y-values on the curve corresponding
+      // to that x-value, provided a y-value exists on the curve at that x.
+      
+      import Singularity.Events.SingularityEvent;
+            
+      import Singularity.Geom.Bezier2;
+      import Singularity.Geom.Knot;
+     
+      import Singularity.Numeric.Consts;
+
+      import Singularity.Interactive.PointSelector;
+      
+      import mx.core.UIComponent;
+      
+      import flash.display.Shape;
+      import flash.display.Sprite;
+      import flash.events.MouseEvent;
+      
+      private var __quad:Bezier2   = new Bezier2(); // quadratic bezier curve
+      
+      private var __count:uint              = 0;                  // count number of control points
+      private var __markers:Array           = new Array();        // collection at markers distributed along spline
+      private var __connect:Shape           = new Shape();        // lines connecting the control points
+      private var __curve:Shape             = new Shape();        // bezier curve drawn in this shape
+      private var __knots:Sprite            = new Sprite();       // draw original knots
+      private var __vLine:Shape             = new Shape();        // vertical line denoting x = <selected_x>
+      private var __marker1:Knot            = null;               // first animated marker (uniform param)
+      private var __marker2:Knot            = null;               // second animated marker (arc-length param)
+      private var __drawArea:PointSelector  = null;               // reference to point-selector
+      private var __myReference:UIComponent = new UIComponent();  // UIComponent reference
+      private var __selectingX:Boolean      = false;              // true if selecting x-value, false if creating Bezier curve
+      
+      // draw area
+      private var __drawX:uint = 0;
+      private var __drawY:uint = 0;
+      private var __drawW:uint = 0;
+      private var __drawH:uint = 0;
+        
+      private function test():void 
+      { 
+      	addChild(__myReference);
+      	        
+        __quad.addEventListener(SingularityEvent.ERROR, errHandler);
+        __quad.container = __curve;
+        
+        // define drawing area - use top of normal button for bottom level
+        __drawX = __status__.x;
+        __drawY = __status__.y + __status__.height + 5;
+        __drawW = __status__.width;
+        __drawH = __reset__.y - __drawY - 20;
+        
+        __marker1 = new Knot(6, 0xff3333);
+        __marker2 = new Knot(6, 0x33ff33);
+        
+        __drawArea = new PointSelector(__drawX, __drawY, __drawW, __drawH, 0xcccccc);
+        __drawArea.addEventListener(SingularityEvent.SELECTED, onSelected);
+          
+        __marker1.visible = false;
+        __marker2.visible = false;
+        
+        __myReference.addChild(__drawArea);
+        __myReference.addChild(__curve);
+        __myReference.addChild(__connect);
+        __myReference.addChild(__knots);
+        __myReference.addChild(__vLine);
+        __myReference.addChild(__marker1);
+        __myReference.addChild(__marker2);
+        
+        __status__.text = "Select 3 points in draw area to define quadratic Bezier.";
+      }
+      
+      private function errHandler(_e:Event):void
+      {
+      	__status__.text = _e.toString();
+      }
+      
+      private function onKnotRollOver(_e:Event):void
+      {
+        __status__.text = "Knot: " + _e.target.id;
+      }
+      
+      private function onKnotRollOut(_e:SingularityEvent):void
+      {
+      	__status__.text = "Knot: " + _e.target.id;
+      }
+      
+      private function onKnotSelected(_e:Event):void
+      {
+      	// no action currently taken
+      }
+      
+      private function onSelected(_e:SingularityEvent):void
+      {
+      	var p:PointSelector = PointSelector(_e.target);
+      	
+      	var pX:uint = p.selectedX;
+      	var pY:uint = p.selectedY;
+      	          
+      	if( __selectingX )
+      	{
+      	  __marker1.visible = false;
+      	  __marker2.visible = false;
+      	  __drawArea.disableXHair();
+      	  
+          var g:Graphics = __vLine.graphics;
+          g.clear();
+          g.lineStyle(0,0xff0000);
+          g.moveTo(pX, __drawY);
+          g.lineTo(pX,__drawY+__drawH);
+          
+          // determine y-values on the quad. bezier corresponding to selected x.
+          var yCoords:Array = __quad.yAtX(pX);
+          if( yCoords.length == 0 )
+            __status__.text = "No y-values on the Bezier curve at that x.";
+          else
+          {
+            var y0:Object     = yCoords[0];    
+            __marker1.x       = pX;
+            __marker1.y       = y0.y;
+            __marker1.visible = true;
+            
+            var myStr:String = "y1: " + (y0.y).toString();
+            
+            if( yCoords.length == 2 )
+            {
+              var y1:Object     = yCoords[1];
+              __marker2.x       = pX;
+              __marker2.y       = y1.y;
+              __marker2.visible = true;
+              
+              myStr += "  , y2: " + (y1.y).toString();
+            }
+            
+            __status__.text = myStr;
+          }
+          __select__.enabled = true;
+      	}
+      	else
+      	{ 	  
+      	  if( ++__count > 3 )
+      	    return;
+      	    
+          var knot:Knot = new Knot(6, 0xffcccc);
+          knot.addEventListener( SingularityEvent.ROLL_OVER, onKnotRollOver );
+          knot.addEventListener( SingularityEvent.ROLL_OUT , onKnotRollOut  );
+          knot.addEventListener( SingularityEvent.SELECTED , onKnotSelected );
+        
+          __quad.addControlPoint(pX,pY);        
+          knot.id = __count;
+          knot.x  = pX;
+          knot.y  = pY;
+        
+          __knots.addChild(knot);
+        
+          if( __count == 3 )
+          {
+            g = __connect.graphics;
+            g.lineStyle(0,0x000000);
+            g.lineTo(pX,pY);
+            
+            __reset__.enabled = true;
+      	
+      	    __drawArea.disableXHair();
+            
+            __quad.draw(1);
+                      	
+            __status__.text    = "Click 'Select x' to define x-value or Reset to draw another curve."; 
+            __reset__.enabled  = true;
+            __select__.enabled = true;
+          }
+          else
+          {
+            g = __connect.graphics;
+            if( __count == 1 )
+              g.moveTo(pX,pY);
+            else
+            {
+              g.lineStyle(0,0x000000);
+              g.lineTo(pX,pY);
+            }
+          }
+        }
+      }
+      
+      private function onSelectX():void
+      {
+        __select__.enabled = false;
+        __selectingX       = true;
+        __drawArea.enableXHair();
+      }
+      
+      private function onReset():void
+      {     	
+        __marker1.visible  = false;
+        __marker2.visible  = false;
+        __select__.enabled = false;
+        __reset__.enabled  = false;
+        __selectingX       = false;
+      	
+        var g:Graphics = __curve.graphics;
+        g.clear();
+        
+        // Completely clean out the knot set, preparing for a new set
+        for( var i:uint=0; i<3; ++i )
+        {
+          var k:Knot = __knots.removeChildAt(0) as Knot;
+          k.destruct();
+        }
+        
+        g = __connect.graphics;
+        g.clear();
+        
+        g = __vLine.graphics;
+        g.clear();
+        
+        __quad.reset();
+        
+        __count = 0;
+        __drawArea.enableXHair();
+        __status__.text = "Select 3 points in draw area to define quadratic Bezier.";
+      }
+      
+      
+    ]]>
+  </mx:Script>
+	
+</mx:Application>
+

@@ -1,0 +1,444 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" applicationComplete="test()" width="600" height="500">
+
+	<mx:Script>
+    <![CDATA[
+      import Singularity.Rigs.Connector;
+      import Singularity.Geom.Wedge;
+      import Singularity.Numeric.Consts;
+      
+      import Singularity.Rigs.BaseBone;
+      import Singularity.Rigs.Bone;
+      import Singularity.Rigs.Chain;
+      import Singularity.Rigs.Hand;
+      import Singularity.Rigs.Template;
+      
+      import flash.display.Sprite;
+      import flash.events.MouseEvent;
+      
+      import mx.core.UIComponent;
+ 
+      // bone (bn) namespace - two-link bone chain used in this example
+      public namespace bn;
+      
+      bn var __xRoot:Number            = 0;                  // x-coordinate of chain root
+      bn var __yRoot:Number            = 0;                  // y-coordinate of chain root
+      bn var __bone:Bone               = null;               // reference to a single bone
+      bn var __b1:Bone                 = null;               // reference to first bone in chain
+      bn var __b2:Bone                 = null;               // reference to second bone in chain
+      bn var __isBone:Boolean          = true;               // true if currently selected item is a Bone
+      bn var __chain:Chain             = new Chain();        // primary bone chain
+      bn var __hand:Hand               = null;               // connector representing a hand bone
+      bn var __lower0:Number           = 0;                  // lower rotational limit for root bone
+      bn var __upper0:Number           = 0;                  // upper rotational limit for root bone
+      bn var __lower1:Number           = 0;                  // lower rotational limit for second bone
+      bn var __upper1:Number           = 0;                  // upper rotational limit for second bone
+      
+      // solver (slv) namespace - solver-specific variables
+      public namespace slv;
+      
+      slv var l1:Number       = 0;
+      slv var l2:Number       = 0;
+      slv var lMax:Number     = 0;
+      slv var two_l1l2:Number = 0;
+      slv var l1Sq:Number     = 0;
+      slv var l2Sq:Number     = 0;
+
+      // user-interface (ui) namespace
+      public namespace ui;
+      ui var __stage:Stage             = null;
+      ui var __myReference:UIComponent = new UIComponent();  // UIComponent reference
+      ui var __axes:Shape              = new Shape();        // coordinate axes with origin at chain root
+      ui var __target:Sprite           = new Sprite();       // target graphic
+      ui var __lowerWedges:Array       = new Array();        // illustrate lower joint limits
+      ui var __upperWedges:Array       = new Array();        // illustrate upper joint limits
+      ui var __lowerContainer:Array    = new Array();        // reference Shapes for each lower wedge
+      ui var __upperContainer:Array    = new Array();        // reference Shapes for each upper wedge
+      ui var __wedges:Sprite           = new Sprite();       // container for wedge graphics
+      ui var __low:Shape               = null;
+      ui var __up:Shape                = null;
+      ui var BLUE:Number               = 0xccccff;
+      ui var GREEN:Number              = 0xccffcc;
+      
+      // Demonstrate 2-link (in-plane) IK solver with rotational joint limits.  some additional work is required to make
+      // this code more general-purpose and is left as an exercise.
+      public function test():void 
+      { 
+      	addChild(ui::__myReference);
+        ui::__myReference.addChild(ui::__axes);
+        ui::__myReference.addChild(ui::__wedges);
+        ui::__myReference.addChild(bn::__chain);
+        
+        ui::__stage = ui::__wedges.stage;
+        bn::__xRoot = ui::__stage.width/2;
+        bn::__yRoot = ui::__stage.height/2;
+        
+        // set joint limits - lower limit must be in [0,-pi] and upper limit in [0,pi]
+        bn::__lower0 = -3*Math.PI/5;
+        bn::__upper0 = Consts.PI_2;
+        
+        bn::__lower1 = -Consts.PI_2;
+        bn::__upper1 = 3*Math.PI/4;
+        
+        // Hand Template
+        var t:Template = new Template();
+        t.insert(0,20);
+        t.insert(25,50);
+        t.insert(85,60);
+        t.insert(100,35);
+        
+        // create hand separate from primary chain
+        bn::__hand = new Hand(8, 50, 15, 15, Hand.RIGHT, t, 0xcccccc, 0x0000ff);
+        bn::__hand.draw();
+        ui::__myReference.addChild(bn::__hand);
+        
+        // draw the target
+        var g:Graphics = ui::__target.graphics;
+        g.lineStyle(0, 0x000000);
+        g.beginFill(0xff0000);
+        g.moveTo(-1,-1);
+        g.lineTo(-1,-5);
+        g.lineTo(1,-5);
+        g.lineTo(1,-1);
+        g.lineTo(5,-1);
+        g.lineTo(5,1);
+        g.lineTo(1,1);
+        g.lineTo(1,5);
+        g.lineTo(-1,5);
+        g.lineTo(-1,1);
+        g.lineTo(-5,1);
+        g.lineTo(-5,-1);
+        g.lineTo(-1,-1);
+        g.endFill();
+        
+        // draw the axes
+        g = ui::__axes.graphics;
+        g.lineStyle(1,0xffcc00);
+        g.moveTo(0,bn::__yRoot);
+        g.lineTo(ui::__stage.width,bn::__yRoot);
+        g.moveTo(bn::__xRoot,0);
+        g.lineTo(bn::__xRoot,ui::__stage.height);
+
+        ui::__stage.addEventListener(MouseEvent.MOUSE_DOWN, startDragging);
+        ui::__stage.addEventListener(MouseEvent.MOUSE_UP  , stopDragging );
+                
+        createBones();
+      }
+      
+      public function startDragging(_e:MouseEvent):void
+      {     	
+      	ui::__target.startDrag();
+      	ui::__stage.addEventListener(Event.ENTER_FRAME, solver);
+      }
+      
+      public function stopDragging(_e:MouseEvent):void
+      {     	
+        ui::__target.stopDrag();
+        ui::__stage.removeEventListener(Event.ENTER_FRAME, solver);
+      }
+      
+      // create two bones (root length 100, second length 50) centered at chain root, oriented along pos. x-axis.
+      public function createBones():void
+      {
+      	// bone lengths - must be greater than zero
+      	var l1:Number = 100;
+      	var l2:Number = 50;
+      	
+      	// root bone
+        bn::__b1      = bn::__chain.createBone();
+      	bn::__b1.NAME = "b1";
+      	bn::__b1.ID   = 0;
+      	bn::__b1.disableMouseEvents();
+      	      
+      	bn::__b1.setInitial(bn::__xRoot, bn::__yRoot);
+      	var bX:Number = bn::__xRoot+l1;
+      	bn::__b1.setTerminal(bX, bn::__yRoot);
+      	bn::__b1.draw();
+
+      	// second bone
+      	bn::__b2      = bn::__chain.createBone();
+      	bn::__b2.NAME = "b2";
+      	bn::__b2.ID   = 1;
+      	bn::__b2.setInitial(bX, bn::__yRoot);
+      	bX += l2;
+      	bn::__b2.setTerminal(bX, bn::__yRoot);
+      	bn::__b2.disableMouseEvents();  
+      	bn::__b2.draw();
+      	            	  
+      	// link the hand connector to the chain
+      	bn::__chain.link(bn::__hand, true);
+      	
+        // assign joint limits -- wedges illustrate lower and upper limits for each bone 
+        
+        // root bone orientation is relative to positive x-axis
+        var b:Bone       = bn::__b1;
+      	var start:Number = b.angle;
+      	var end:Number   = start+bn::__lower0;
+      	b.lowerLimit     = bn::__lower0;
+      	b.upperLimit     = bn::__upper0;
+      	
+      	ui::__lowerWedges[0] = new Wedge(b.length, b.initX, b.initY, start, end);
+      	  
+      	end                  = start+bn::__upper0;
+      	ui::__upperWedges[0] = new Wedge(b.length, b.initX, b.initY, start, end);
+      	
+      	ui::__lowerContainer[0] = new Shape();
+      	ui::__wedges.addChild(ui::__lowerContainer[0]);
+      	
+      	ui::__upperContainer[0] = new Shape();
+      	ui::__wedges.addChild(ui::__upperContainer[0]);
+      	
+      	
+      	b               = bn::__b2;
+      	var parent:Bone = bn::__chain.getBone(0);
+      	start           = parent.angle;
+      	end             = start+bn::__lower1;
+      	b.lowerLimit    = bn::__lower1;
+      	b.upperLimit    = bn::__upper1;
+      	
+      	ui::__lowerWedges[1] = new Wedge(b.length, b.initX, b.initY, start, end);
+      	  
+      	end                  = start+bn::__upper1;
+      	ui::__upperWedges[1] = new Wedge(b.length, b.initX, b.initY, start, end);
+      	
+      	ui::__lowerContainer[1] = new Shape();
+      	ui::__wedges.addChild(ui::__lowerContainer[1]);
+      	
+      	ui::__upperContainer[1] = new Shape();
+      	ui::__wedges.addChild(ui::__upperContainer[1]);	 
+      	
+      	// place the target at the end effector of the chain
+      	ui::__target.x = bX;
+      	ui::__target.y = bn::__yRoot;
+      	ui::__myReference.addChild(ui::__target);
+      	
+      	// draw the joint limits for each bone
+      	ui::__lowerWedges[0].draw(ui::__lowerContainer[0], 1, 0xff0000, ui::BLUE , 0.25);
+        ui::__upperWedges[0].draw(ui::__upperContainer[0], 1, 0x0000ff, ui::GREEN, 0.25);
+        
+        ui::__lowerWedges[1].draw(ui::__lowerContainer[1], 1, 0xff0000, ui::BLUE , 0.25);
+        ui::__upperWedges[1].draw(ui::__upperContainer[1], 1, 0x0000ff, ui::GREEN, 0.25);
+        
+        // assign solver-specific variables
+        slv::lMax     = (l1+l2)*(l1+l2);
+        slv::two_l1l2 = 2*l1*l2;
+        slv::l1Sq     = l1*l1;
+        slv::l2Sq     = l2*l2;
+        
+        // record bone lengths for the solver
+        slv::l1 = l1;
+        slv::l2 = l2;
+      }
+      
+      // This solver is intended for basic instructional purposes and is history-independent, so it is
+      // prone to 'popping' when the target moves across the horizontal axis in infeasible space.  The
+      // code should be modfified if working with joint limits not in the specified ranges.
+      //
+      // Joint limits are applied post-solution via offset angles.  More bookkeeping, but easier to understand
+      // than incorporating limits directly into the solver math.  The latter will be addressed in a future
+      // TechNote.
+      //
+      // NOTE:  Do not use this solver for instances where one of the bones is unconstrained -- a solver that
+      // handles this condition will be published in a future TechNote.  In practice, it is very rare that
+      // any bone is completely unconstrained.
+      //
+      // Also note that this solver updates the visual display of joint limits for the second bone at the
+      // end of every solution.
+      public function solver(_e:Event):void
+      {
+      	// root-to-target distance
+        var tX:Number        = ui::__target.x ;
+        var tY:Number        = ui::__target.y;
+        var dX:Number        = tX-bn::__xRoot;
+        var dY:Number        = tY-bn::__yRoot;
+        var dSq:Number       = dX*dX + dY*dY;
+        var limit:Boolean    = false;
+        var b2X:Number       = 0;
+        var b2Y:Number       = 0;
+        var theta1:Number    = 0;
+        var theta2:Number    = 0;
+        var theta2Old:Number = 0;
+
+        // There are two possible infeasible conditions.  Instead of trying to compact everything into the minimal number of lines,
+        // each case is handled separately.  Once you understand all the cases, try making the solver more efficient and robust.
+        
+        // The chain is invalidated at the end of each solution, indicating that the position and orientation of anything linked
+        // forward to the chain (Hand connector in this demo) is no longer valid and needs to be updated.  
+        if( dSq > slv::lMax )
+        {
+          theta1 = Math.atan2(dY,dX);
+    
+          // joint limits
+          if( theta1 < bn::__lower0 )
+          {
+            limit  = true;
+            theta1 = bn::__lower0; 
+          }
+
+          if( theta1 > bn::__upper0 )
+          {
+            limit  = true;
+            theta1 = bn::__upper0; 
+          }
+
+          // reorient root bone and use terminal coordinates to get initial coordinates for second bone
+          bn::__b1.reorient(0, 0, theta1, false, true);
+          b2X = bn::__b1.terminalX;
+          b2Y = bn::__b1.terminalY;
+           
+          if( limit )
+          {
+            // get the angle wrt joint limits given raw orientation unless the direction to the target is already in line with the first bone
+            var pointTo:Number = Math.atan2(tY-b2Y,tX-b2X);
+            if( Math.abs(theta1-pointTo) < 0.1 )
+              theta2 = theta1;
+            else
+              theta2 = getRotation(theta1, pointTo, bn::__lower1, bn::__upper1, b2X, b2Y, tX, tY );
+
+            // re-orient second bone (move and set orientation)
+            bn::__b2.reorient(b2X, b2Y, theta2, true, true);
+          }
+          else
+            bn::__b2.reorient(b2X, b2Y, theta1, true, true);
+          
+          bn::__chain.invalidate();
+          updateVisualLimit();
+        }
+        else
+        {
+          var c2:Number = (dX*dX + dY*dY - slv::l1Sq - slv::l2Sq )/slv::two_l1l2;
+          if( c2 < -1 || c2 > 1 )
+          {
+          	// infeasible solution - rotate in direction of target
+            theta1 = Math.atan2(dY,dX);
+
+            // joint limits
+            theta1 = Math.max(theta1,bn::__lower0);
+            theta1 = Math.min(theta1,bn::__upper0); 
+
+            bn::__b1.reorient(0, 0, theta1, false, true)
+            b2X = bn::__b1.terminalX;
+            b2Y = bn::__b1.terminalY;
+
+            // joint limits - history-independent.  As an exercise, what is a more robust way to code this?
+            var angle:Number = Math.min(Math.PI, bn::__upper1);
+            bn::__b2.reorient(b2X, b2Y, theta1+angle, true, true);
+            
+            bn::__chain.invalidate();
+            updateVisualLimit();
+          }
+          else
+          {
+            theta2          = Math.acos(c2);
+            var s2:Number   = Math.sin(theta2);
+            var l2s2:Number = slv::l2*s2;
+            var l2c2:Number = slv::l2*c2;
+            var l1c2:Number = slv::l1 + l2c2;
+
+            theta1 = Math.atan2( l1c2*dY - l2s2*dX, l2s2*dY + l1c2*dX );
+
+            // solution complete - apply joint limits
+            if( theta1 < bn::__lower0 )
+            {
+              limit  = true;
+              theta1 = bn::__lower0; 
+            }
+            else if( theta1 > bn::__upper0 )
+            {
+              limit  = true;
+              theta1 = bn::__upper0; 
+            }
+
+            bn::__b1.reorient(0, 0, theta1, false, true)
+            b2X = bn::__b1.terminalX;
+            b2Y = bn::__b1.terminalY;
+
+            if( limit )
+            {
+              pointTo = Math.atan2(tY-b2Y,tX-b2X);
+              if( Math.abs(theta1-pointTo) < 0.1 )
+                theta2 = theta1;
+              else
+                theta2 = getRotation(theta1, pointTo, bn::__lower1, bn::__upper1, b2X, b2Y, tX, tY);
+
+              bn::__b2.reorient(b2X, b2Y, theta2, true, true);
+            }
+            else
+            {
+              theta2 = getRotation(theta1, theta1+theta2, bn::__lower1, bn::__upper1, b2X, b2Y, tX, tY);
+              bn::__b2.reorient(b2X, b2Y, theta2, true, true);
+            }
+            
+            bn::__chain.invalidate();
+            updateVisualLimit();
+          }
+        }
+      }
+      
+      // clockwise orientation for three points?
+      public function isClockwise(_x0:Number, _y0:Number, _x1:Number, _y1:Number, _x2:Number, _y2:Number):Boolean
+      {
+        return ((_y2-_y0)*(_x1-_x0) > (_y1-_y0)*(_x2-_x0));
+      }
+
+      // a bit of brute force :)
+      public function getRotation(_p:Number, _c:Number, _lower:Number, _upper:Number, _bX:Number, _bY:Number, _tX:Number, _tY:Number):Number
+      {
+        // all angles > 0
+        var parent:Number = (_p>0) ? _p : Consts.TWO_PI+_p;
+        var child:Number  = (_c>0) ? _c : Consts.TWO_PI+_c;
+        var d:Number      = 0;
+
+        var lower:Number = parent+_lower;
+        lower = (lower>=0) ? lower : Consts.TWO_PI+lower;
+
+        var upper:Number = parent+_upper;
+        var cw:Boolean   = isClockwise(bn::__xRoot, bn::__yRoot, _bX, _bY, _tX, _tY);
+
+        // exercise - if larger negative joint limits were allowed, how would this code change?
+        if( cw )
+        {
+          d = upper-child;
+          if( d > Math.PI )
+            d -= Consts.TWO_PI;
+
+          return (d < 0) ? upper : _c;
+        }
+        else
+        {
+          d = child-lower;
+          return (d < 0) ? lower : _c;
+        }
+      }
+      
+     // update joint limit visual display for second bone
+     public function updateVisualLimit():void
+     {
+       var b:Bone       = bn::__b2;
+       var parent:Bone  = bn::__b1;
+       var start:Number = parent.angle;
+       var end:Number   = start+bn::__lower1;
+
+       var l:Wedge  = ui::__lowerWedges[1];
+       l.xC         = b.initX;
+       l.yC         = b.initY;
+       l.startAngle = start;
+       l.endAngle   = end;
+        
+       end          = start+bn::__upper1;
+       var u:Wedge  = ui::__upperWedges[1];
+       u.xC         = b.initX;
+       u.yC         = b.initY;
+       u.startAngle = start;
+       u.endAngle   = end;
+        
+       ui::__lowerWedges[1].draw(ui::__lowerContainer[1], 1, 0xff0000, ui::BLUE , 0.25);
+       ui::__upperWedges[1].draw(ui::__upperContainer[1], 1, 0x0000ff, ui::GREEN, 0.25);
+     }
+      
+    ]]>
+  </mx:Script>
+
+	
+</mx:Application>
+

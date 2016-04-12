@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application 
+	xmlns:mx="http://www.adobe.com/2006/mxml" 
+	xmlns:p3dflex="org.papervision3d.flex.*"
+	layout="vertical"
+	pageTitle="PaperVision3D Path Animation (Flex) Example"
+	frameRate="24"
+	applicationComplete="initPV3D()">
+	
+	<!-- Make sure the Canvas3D.as file is in the org.papervision3d.flex folder -->
+	
+    <mx:Panel id="mainPanel" title="PaperVision3D Path Animation (Flex) Example">
+      <p3dflex:Canvas3D id="p3dCanvas" backgroundColor="#000000" backgroundAlpha="1" width="580" height="435"/>	
+	</mx:Panel>
+	<mx:Button label="Animate" id="__animate__" enabled="true" click="onAnimate()"/>
+	
+	<mx:Script>
+      <![CDATA[
+        import org.papervision3d.examples.SimpleSphere;
+        
+        import Singularity.Events.SingularityEvent;
+			
+        // Namespace for all Papervision 3D stuff 
+        public namespace p3d;
+        p3d var __mySphere:SimpleSphere;
+        p3d var __knots:Array = new Array();
+		
+        public function initPV3D():void
+		{
+		  // the sphere is placed at the origin with a radius of 100.  Define some knots that 'wrap' around the sphere
+		  p3d::__knots[0] = {X:300 , Y:300 , Z:-500};
+		  p3d::__knots[1] = {X:300 , Y:100 , Z:-300};
+		  p3d::__knots[2] = {X:200 , Y:100 , Z:100 };
+		  p3d::__knots[3] = {X:0   , Y:0   , Z:100 };
+		  p3d::__knots[4] = {X:-200, Y:-100, Z:100 };
+		  p3d::__knots[5] = {X:-300, Y:-100, Z:-300};
+		  p3d::__knots[6] = {X:0   , Y:-200, Z:-400};
+		  p3d::__knots[7] = {X:200 , Y:-300, Z:-100};
+		  
+          p3d::__mySphere = new SimpleSphere(p3dCanvas.canvas);
+          p3d::__mySphere.addEventListener(SingularityEvent.COMPLETE, onComplete);
+          
+          p3d::__mySphere.setupScene(p3d::__knots);
+        }
+        
+        public function onAnimate():void
+        {
+          __animate__.enabled = false;
+          p3d::__mySphere.animate();
+        }
+        
+        public function onComplete(_e:SingularityEvent):void
+        {
+          __animate__.enabled = true;
+        }
+      ]]>
+	</mx:Script>
+	
+</mx:Application>

@@ -1,0 +1,346 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" applicationComplete="test()" width="600" height="500">
+  <mx:TextArea height="32" id="__status__" wordWrap="true" editable="false" top="10" left="23" right="22"/>
+  <mx:Button x="466" y="464" label="Next Step" id="__next__" enabled="false" click="onNext()"/>
+  <mx:Button x="23" y="464" label="Target Phase" id="__target__" enabled="false" click="onTarget()"/>
+	
+	<mx:Script>
+    <![CDATA[
+      import Singularity.Geom.Knot;
+      
+      import Singularity.Numeric.Consts;
+      
+      import Singularity.Rigs.BaseBone;
+      import Singularity.Rigs.Bone;
+      import Singularity.Rigs.Chain;
+      import Singularity.Rigs.Template;
+      
+      import flash.display.Sprite;
+      import flash.events.MouseEvent;
+      import flash.events.KeyboardEvent;
+      import flash.ui.Keyboard;
+      
+      import mx.core.UIComponent;
+ 
+      // bone (bn) namespace
+      public namespace bn;
+      
+      bn var __isTarget:Boolean        = false;              // true if processing resolving targets, false if resolving position/orientation
+      bn var __isTerminated:Boolean    = false;              // true when chain is terminated
+      bn var __count:uint              = 0;                  // general counter
+      bn var __boneCount:uint          = 0;                  // number bones in the chain
+      bn var __bone:Bone               = null;               // reference to a single bone
+      bn var __chain:Chain             = new Chain();        // primary bone chain
+      bn var __curTargetX:Number       = 0;                  // current target at k-th stage, x-coordinate
+      bn var __curTargetY:Number       = 0;                  // current target at k-th stage, y-coordinate
+      bn var __targetX:Number          = 0;                  // x-coordinate of actual target for end-effector
+      bn var __targetY:Number          = 0;                  // y-coordinate of actual target for end-effector
+      bn var __recordX:Array           = new Array();        // record new target x-coordinates
+      bn var __recordY:Array           = new Array();        // record new target y-coordinates
+      bn var __deltaX:Number           = 0;                  // delta between final target and initial x-coordinate of root bone
+      bn var __deltaY:Number           = 0;                  // delta between final target and initial y-coordinate of root bone
+      bn var __iteration:uint          = 0;                  // iteration count
+      bn var __maxIterations:uint      = 6;                  // maximum number of iterations
+      bn var __stop:Number             = 6;                  // stopping criteria for squared distance between end effector and target at each iteration
+      
+      // user-interface (ui) namespace
+      public namespace ui;
+      ui var __myReference:UIComponent = new UIComponent();  // UIComponent reference
+      ui var __stage:Stage             = null;
+      ui var __track:Sprite            = new Sprite();
+      ui var __knots:Sprite            = new Sprite();       // display container for all knots
+      ui var __myTarget:Shape          = new Shape();        // container for target graphic
+      ui var __knotArr:Array           = new Array();        // contains all knot references
+      
+      public function test():void 
+      { 
+      	addChild(ui::__myReference);
+        ui::__myReference.addChild(bn::__chain);
+        ui::__myReference.addChild(ui::__track);
+        ui::__myReference.addChild(ui::__knots);
+        ui::__myReference.addChild(ui::__myTarget);
+        
+        ui::__stage = ui::__track.stage;
+        
+        // define drawing area 
+        var drawY:uint = __status__.y + __status__.height + 5;
+        var drawH:uint = __next__.y - drawY - 10;
+        
+        var g:Graphics = ui::__track.graphics;
+        g.lineStyle(1,0xffffff,.2);
+        g.beginFill(0xffffff,.2);
+        g.drawRect(0,drawY,ui::__stage.width,drawH);
+
+        ui::__track.addEventListener(MouseEvent.CLICK, onSelected);
+        ui::__stage.addEventListener(KeyboardEvent.KEY_DOWN, terminate);
+        
+        // draw target graphic
+        ui::__myTarget.visible = false;
+        g                      = ui::__myTarget.graphics;
+        g.lineStyle(0, 0x000000);
+        g.beginFill(0xff0000);
+        g.moveTo(-1,-1);
+        g.lineTo(-1,-5);
+        g.lineTo(1,-5);
+        g.lineTo(1,-1);
+        g.lineTo(5,-1);
+        g.lineTo(5,1);
+        g.lineTo(1,1);
+        g.lineTo(1,5);
+        g.lineTo(-1,5);
+        g.lineTo(-1,1);
+        g.lineTo(-5,1);
+        g.lineTo(-5,-1);
+        g.lineTo(-1,-1);
+        g.endFill();
+        
+        __status__.text = "Click anywhere to start drawing a bone.  New clicks create new bones.  Click SPACE BAR to end the chain";
+      }
+      
+      public function errHandler(_e:Event):void
+      {
+      	__status__.text = _e.toString();
+      }
+      
+      public function trackMouse(_e:MouseEvent):void
+      {   
+      	if( !bn::__isTerminated )
+      	{  	
+          bn::__bone.setTerminal(_e.localX,_e.localY);  
+      	  bn::__bone.draw();
+      	}
+      	else
+      	{
+      	  ui::__myTarget.x = _e.localX;
+      	  ui::__myTarget.y = _e.localY;
+      	}
+      }
+      
+      // In this example, the root of the chain is fixed and the end-effector is resolved toward the target
+      public function onSelected(_e:MouseEvent):void
+      {
+      	var pX:uint = _e.localX;
+      	var pY:uint = _e.localY;
+
+      	if( bn::__count == 0 )
+      	{
+      	  bn::__bone      = bn::__chain.createBone();      // newly created bone is now in display list
+      	  bn::__bone.NAME = "Bone"+bn::__count.toString();
+      	  bn::__bone.ID   = bn::__count;
+      	  
+      	  // completely turn off all internal mouse events until chain is completed
+      	  bn::__bone.disableMouseEvents();
+      	      
+      	  // initial joint coordinates
+      	  bn::__bone.setInitial(pX, pY);
+      	      
+          ui::__track.addEventListener(MouseEvent.MOUSE_MOVE, trackMouse);
+        }
+        else
+        {
+          ui::__track.removeEventListener(MouseEvent.MOUSE_MOVE, trackMouse);
+            
+          // terminate current bone
+      	  bn::__bone.setTerminal(pX, pY);
+      	  bn::__bone.draw();
+
+      	  // begin new bone
+      	  bn::__bone      = bn::__chain.createBone();      // newly created bone is now in display list
+      	  bn::__bone.NAME = "Bone"+bn::__count.toString();
+      	  bn::__bone.ID   = bn::__count;
+      	   
+      	  bn::__bone.disableMouseEvents();
+      	  bn::__bone.setInitial(pX, pY);
+      	      
+          ui::__track.addEventListener(MouseEvent.MOUSE_MOVE, trackMouse);
+      	}
+        bn::__count++;
+      }
+      
+      // terminate the chain
+      public function terminate(_e:KeyboardEvent):void
+      {
+      	if( _e.charCode == flash.ui.Keyboard.SPACE )
+      	{
+      	  ui::__track.removeEventListener(MouseEvent.MOUSE_MOVE, trackMouse);
+      	  ui::__track.removeEventListener(MouseEvent.CLICK, onSelected);
+      	  ui::__track.visible = false;
+      	  bn::__isTerminated  = true;
+      	  
+      	  // currently drawn bone is invalid
+          bn::__chain.pop();
+          
+      	  bn::__boneCount    = bn::__count-1;
+      	  __target__.enabled = true;
+        }
+      }
+      
+      // handle clicking on 'Target Phase' button
+      public function onTarget():void
+      {
+      	__target__.enabled     = false;
+      	ui::__track.visible    = true;
+      	ui::__myTarget.visible = true;
+      	
+      	ui::__track.addEventListener(MouseEvent.MOUSE_MOVE, trackMouse);
+      	ui::__track.addEventListener(MouseEvent.CLICK, onTargetSelected);
+      	
+      	__status__.text = "Click to select target for end effector.";
+      }
+      
+      // handle clicking on 'Next' button
+      public function onNext():void
+      {
+      	if( bn::__isTarget )
+      	{
+      	  if( bn::__count <	bn::__boneCount )
+      	  {
+      	  	var index:uint = bn::__boneCount-bn::__count-1;
+      	  	var b:Bone     = bn::__chain.getBone(index);
+      	  	
+      	  	// angle needed to rotate current bone to align with current target
+      	  	var dX:Number  = bn::__curTargetX - b.initX;
+      	  	var dY:Number  = bn::__curTargetY - b.initY;
+      	  	var rot:Number = Math.atan2(dY,dX);
+      	  	 
+      	  	// compute new target based on current bone's length and place a knot
+      	  	var l:Number     = b.length;
+      	  	bn::__curTargetX = bn::__curTargetX - l*Math.cos(rot);
+      	  	bn::__curTargetY = bn::__curTargetY - l*Math.sin(rot);
+      	  	
+      	  	// record new target for next phase unless at last step when we only need the target value
+      	  	if( index > 0 )
+      	  	{
+      	  	  bn::__recordX[index-1] = bn::__curTargetX;
+              bn::__recordY[index-1] = bn::__curTargetY;
+            }
+      	  	
+      	  	var knot:Knot;
+      	  	if( bn::__iteration == 0 )
+      	  	{
+      	  	  knot    = new Knot(6, 0xffcccc);
+      	  	  knot.id = bn::__count;
+      	  	  
+      	  	  // add knot to collection and display list
+      	  	  ui::__knotArr[bn::__count] = knot;
+              ui::__knots.addChild(knot);
+            }
+            else
+              knot = ui::__knotArr[bn::__count]; 
+              
+            knot.x       = bn::__curTargetX;
+            knot.y       = bn::__curTargetY;
+            knot.visible = true;
+           
+            bn::__count++;
+      	  }
+      	  else
+      	  {
+      	    bn::__isTarget  = false;
+      	    bn::__count     = 0;
+      	    __status__.text = "Targeting phase complete.";
+      	  }
+      	}
+      	else
+      	{
+      	  if( bn::__count < bn::__boneCount )
+      	  {
+      	  	__status__.text  = "Reposition bone: " + bn::__count;
+      	  	b                = bn::__chain.getBone(bn::__count);
+      	    var curX:Number  = 0;
+      	    var curY:Number  = 0;
+      	    var termX:Number = 0;
+      	    var termY:Number = 0;
+      	  	
+      	    // if first iter., get deltas between current target and init coordinates of root bone.  Nonzero deltas means the end effector 
+      	    // does not reach the final target
+      	    if( bn::__count == 0 )
+      	    {
+      	      curX         = b.initX;
+      	      curY         = b.initY;
+      	      termX        = bn::__recordX[0];
+      	      termY        = bn::__recordY[0];
+      	      bn::__deltaX = bn::__curTargetX - curX;
+      	      bn::__deltaY = bn::__curTargetY - curY;
+      	  
+      	      // this demo has root bone fixed - modify only terminal coordinates for root bone
+      	      termX -= bn::__deltaX;
+      	      termY -= bn::__deltaY;
+      	      b.setTerminal(termX, termY);
+      	      b.draw();
+      	    }
+      	    else
+      	    {
+      	      curX  = bn::__recordX[bn::__count-1] - bn::__deltaX;
+      	      curY  = bn::__recordY[bn::__count-1] - bn::__deltaY;
+      	      termX = bn::__recordX[bn::__count] - bn::__deltaX;
+      	      termY = bn::__recordY[bn::__count] - bn::__deltaY;
+      	      
+      	      b.setInitial(curX, curY);
+      	      b.setTerminal(termX, termY);
+      	      b.draw();
+      	    }
+      	    bn::__count++;
+      	  }
+      	  else
+      	  {
+      	  	// test if current end effector is close enough to target
+      	  	dX                   = bn::__targetX - bn::__chain.endX;
+      	  	dY                   = bn::__targetY - bn::__chain.endY;
+      	  	var error:Number     = (dX*dX + dY*dY);
+      	  	var finished:Boolean = error <= bn::__stop || ++bn::__iteration >= bn::__maxIterations; 
+      	    
+      	    var myText:String = "Iteration: " + bn::__iteration + " complete, error: " + Math.sqrt(error) + ".";
+      	    
+      	    if( !finished )
+      	    {
+      	      myText += "  Click 'Next' button to begin next iteration.";
+      	      bn::__curTargetX = bn::__targetX;
+      	      bn::__curTargetY = bn::__targetY;
+      	      
+      	      for( var i:uint=0; i<ui::__knotArr.length; ++i )
+      	        ui::__knotArr[i].visible = false;
+      	        
+      	      bn::__count    = 0;
+      	      bn::__isTarget = true;
+      	    }
+      	    else
+      	    {
+      	      myText          += "  Process complete.";
+      	      __next__.enabled = false;
+      	    }
+      	    
+      	    __status__.text = myText;
+      	  }
+      	}
+      }
+      
+      // end effector target selected
+      public function onTargetSelected(_e:MouseEvent):void
+      {
+      	bn::__curTargetX = _e.localX;
+      	bn::__curTargetY = _e.localY;
+      	ui::__myTarget.x = bn::__curTargetX;
+      	ui::__myTarget.y = bn::__curTargetY;
+      	bn::__targetX    = bn::__curTargetX;
+      	bn::__targetY    = bn::__curTargetY;
+      	
+      	ui::__track.removeEventListener(MouseEvent.MOUSE_MOVE, trackMouse);
+      	ui::__track.removeEventListener(MouseEvent.CLICK, onTargetSelected);
+      	
+      	// prepare for first stage in target phase
+      	bn::__count    = 0;
+      	bn::__isTarget = true;
+        
+        // record target coordinates for placement stage - could use the knot coordinates, but we need to have formal storage in the actual solver
+        bn::__recordX[bn::__boneCount-1] = bn::__curTargetX;
+        bn::__recordY[bn::__boneCount-1] = bn::__curTargetY;
+        
+        __next__.enabled = true;
+      	__status__.text  = "Click 'Next Step' button to observe each step in the target phase.";
+      }
+    ]]>
+  </mx:Script>
+
+	
+</mx:Application>

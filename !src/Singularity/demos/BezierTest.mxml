@@ -1,0 +1,351 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" applicationComplete="test()" width="600" height="500">
+  <mx:TextArea height="26" id="__status__" wordWrap="true" editable="false" top="10" left="23" right="22"/>
+  <mx:Button x="8" y="468" label="Normal" id="__normal__" enabled="false" click="onNormal()"/>
+  <mx:Button x="84" y="468" label="Interpolate" id="__interpolate__" enabled="false" click="onInterpolate()"/>
+  <mx:Button x="185" y="468" label="Move" id="__move__" enabled="false" click="onMove()"/>
+  <mx:Button x="252" y="468" label="Reset" id="__reset__" enabled="false" click="onReset()"/>
+  <mx:Button x="321" y="468" label="Arc Length" id="__arclen__" enabled="false" click="onArcLen()"/>
+  <mx:Button x="471" y="468" label="Quad" id="__quad__" enabled="false" click="onQuad()"/>
+  <mx:Button x="536" y="468" label="Cubic" id="__cubic__" click="onCubic()"/>
+	
+	<mx:Script>
+    <![CDATA[
+      import Singularity.Geom.Parametric;
+      import Singularity.Geom.BZFactory;
+      import Singularity.Geom.Bezier2;
+      import Singularity.Geom.Bezier3;
+      import Singularity.Geom.Knot;
+     
+      import Singularity.Events.SingularityEvent;
+
+      import Singularity.Interactive.PointSelector;
+      
+      import mx.core.UIComponent;
+      
+      import flash.display.Shape;
+      
+      // bezier (bz) namespace
+      public namespace bz;
+      
+      bz var MAX_KNOTS:uint            = 3;
+      bz var NORMAL:String             = "N";
+      bz var INTERP:String             = "I";
+      bz var MOVE:String               = "M";
+      
+      bz var __mode:String             = bz::NORMAL;
+      bz var __prevMode:String         = bz::NORMAL;
+      bz var __factory:BZFactory       = new BZFactory;
+      bz var __bezier:Parametric       = null;               // Bezier instance of appropriate degree
+      bz var __count:uint              = 0;                  // count number of control points
+      bz var __selected:uint           = 0;                  // index of selected control point
+      bz var __knots:Array             = new Array();        // collection of Knot references
+      bz var __controlPoints:Array     = new Array();        // collection of control-point coordinates
+      bz var __connect:Shape           = new Shape();        // lines connecting the control points
+      bz var __curve:Shape             = new Shape();        // bezier curve drawn in this Shape
+      bz var __drawArea:PointSelector  = null;               // reference to point-selector
+      bz var __myReference:UIComponent = new UIComponent();  // UIComponent reference
+      
+      public function test():void 
+      { 
+      	addChild(bz::__myReference);
+      	        
+      	// get the appropriate instance from the factory based on number of control points
+      	bz::__bezier = bz::__factory.getInstance(bz::MAX_KNOTS);
+        bz::__bezier.addEventListener(SingularityEvent.ERROR, errHandler);
+        bz::__bezier.container = bz::__curve;
+        
+        // define drawing area - use top of normal button for bottom level
+        var drawX:uint = __status__.x;
+        var drawY:uint = __status__.y + __status__.height + 5;
+        var drawW:uint = __status__.width;
+        var drawH:uint = __normal__.y - drawY - 10;
+        
+        bz::__drawArea = new PointSelector(drawX, drawY, drawW, drawH, 0xcccccc);
+        bz::__drawArea.addEventListener(SingularityEvent.SELECTED, onSelected);
+        
+        bz::__myReference.addChild(bz::__drawArea);
+        bz::__myReference.addChild(bz::__curve);
+        bz::__myReference.addChild(bz::__connect);
+        
+        // interpolation not yet available in cubic bezier
+        __interpolate__.enabled = (bz::MAX_KNOTS < 4);
+        if( bz::MAX_KNOTS < 4 )
+          __status__.text = "Normal Mode:  Click in draw area to select 3 control points or select Interpolate Mode";
+        else
+          __status__.text = "Normal Mode:  Click in draw area to select " + bz::MAX_KNOTS + " control points or select Interpolate Mode";
+      }
+      
+      public function errHandler(_e:Event):void
+      {
+      	__status__.text = _e.toString();
+      }
+      
+      public function onKnotRollOver(_e:Event):void
+      {
+        __status__.text = "Knot: " + _e.target.id;
+      }
+      
+      public function onKnotRollOut(_e:SingularityEvent):void
+      {
+      	if( bz::__mode == bz::NORMAL )
+      	  __status__.text = "Bezier curve drawn with selected control points.  Move control point or reset";
+      	else if( bz::__mode == bz::INTERP )
+      	  __status__.text = "Points interpolated with t=" + bz::__bezier.getParam(0) + " at second control point";
+      	else if ( bz::__mode == bz::MOVE )
+      	  __status__.text = "Selected control point: " + bz::__selected + ".  Click in draw area to move control point";
+      	else
+      	  __status__.text = "";
+      }
+      
+      public function onKnotSelected(_e:Event):void
+      {
+      	if( bz::__mode == bz::MOVE )
+      	{
+          __status__.text = "Selected control point: " + bz::__selected + ".  Click in draw area to move control point";
+      	  var k:Knot      = Knot(_e.target);
+      	  bz::__selected  = k.id;
+
+      	  bz::__drawArea.enableXHair();
+      	
+      	  k.color(0xff0000);
+      	}
+      }
+      
+      public function onSelected(_e:SingularityEvent):void
+      {
+      	var p:PointSelector     = PointSelector(_e.target);
+      	__interpolate__.enabled = false;
+      	__normal__.enabled      = false;
+      	
+      	var pX:uint = p.selectedX;
+      	var pY:uint = p.selectedY;
+      	
+      	// process move mode first
+      	if( bz::__mode == bz::MOVE )
+        {
+          bz::__drawArea.disableXHair();
+              
+          // move the control point and then update the curve based on previous mode
+          bz::__bezier.moveControlPoint(bz::__selected, pX, pY);
+          var k:Knot    = bz::__knots[bz::__selected];
+          var pt:Object = bz::__controlPoints[bz::__selected];
+          pt.X          = pX;
+          pt.Y          = pY;
+          k.x           = pX;
+          k.y           = pY;
+          k.resetColor();
+          
+          connectKnots();
+          
+          bz::__curve.graphics.clear();
+          if( bz::__prevMode == bz::NORMAL )
+          {
+           	bz::__bezier.draw(1.0);
+           	bz::__mode = bz::NORMAL;
+          }
+          else if( bz::__prevMode == bz::INTERP )
+          {
+           	bz::__bezier.interpolate(bz::__controlPoints);
+            bz::__bezier.draw(1.0);
+                
+           	bz::__mode = bz::NORMAL;
+          }
+        }
+        else
+      	{
+      	  if( bz::__count < bz::MAX_KNOTS )
+      	  {                  
+            var knot:Knot = new Knot(6, 0xffcccc);
+            knot.addEventListener( SingularityEvent.ROLL_OVER, onKnotRollOver );
+            knot.addEventListener( SingularityEvent.ROLL_OUT , onKnotRollOut  );
+            knot.addEventListener( SingularityEvent.SELECTED , onKnotSelected );
+        
+            bz::__bezier.addControlPoint(pX,pY);
+            bz::__knots.push(knot);
+        
+            knot.id = bz::__count++;
+            knot.x  = pX;
+            knot.y  = pY;
+        
+            bz::__myReference.addChild(knot);
+        
+            // add point to knot collection
+            bz::__controlPoints.push( {X:pX, Y:pY} );
+          
+            if( bz::__count == 1 )
+            {
+              bz::__connect.graphics.lineStyle(0,0x000000);
+              bz::__connect.graphics.moveTo(pX, pY);	
+            }
+            else if( bz::__count < bz::MAX_KNOTS )
+            {
+              bz::__connect.graphics.lineTo(pX, pY);
+            }
+            else if( bz::__count == bz::MAX_KNOTS )
+            {
+              p.disableXHair();
+            
+              bz::__connect.graphics.lineTo(pX, pY);	
+            
+              // action depends on mode
+              if( bz::__mode == bz::NORMAL )
+                bz::__bezier.draw(1.0);
+              else if( bz::__mode == bz::INTERP )
+              {
+                bz::__bezier.interpolate(bz::__controlPoints);
+                bz::__bezier.draw(1.0);
+              }
+            
+              __move__.enabled   = true;
+              __reset__.enabled  = true;
+              __arclen__.enabled = true;
+            }
+          }
+        }
+      }
+      
+      public function connectKnots():void
+      {
+      	var g:Graphics = bz::__connect.graphics;
+      	g.clear();
+      	g.lineStyle(0,0x000000);
+      	var p:Object = bz::__controlPoints[0];
+      	g.moveTo(p.X, p.Y);
+      	
+      	for( var i:uint=1; i<bz::MAX_KNOTS; ++i )
+      	{
+          p = bz::__controlPoints[i];
+      	  g.lineTo(p.X, p.Y);
+      	}
+      }
+      
+      // Button handlers
+      public function onQuad():void
+      {
+      	if( bz::__bezier != null )
+      	  onReset();
+      	
+      	__quad__.enabled  = false;
+      	__cubic__.enabled = true;
+      	
+      	bz::MAX_KNOTS          = 3;
+      	bz::__bezier           = bz::__factory.getInstance(3);
+      	bz::__bezier.container = bz::__curve;
+      	
+      	__status__.text = "Normal Mode:  Click in draw area to select 3 control points or select Interpolate Mode";
+      }
+      
+      public function onCubic():void
+      {
+      	if( bz::__bezier != null )
+      	  onReset();
+      	
+      	__quad__.enabled  = true;
+      	__cubic__.enabled = false;
+      	
+      	bz::MAX_KNOTS          = 4;
+      	bz::__bezier           = bz::__factory.getInstance(4);
+      	bz::__bezier.container = bz::__curve;
+      	
+      	__status__.text = "Normal Mode:  Click in draw area to select 4 control points";
+      }
+      
+      public function onInterpolate():void
+      {
+      	__interpolate__.enabled = false;
+      	__normal__.enabled      = true;
+      	
+      	bz::__mode = bz::INTERP;
+      	__status__.text     = "Interpolate Mode:  Click in draw area to select 3 interpolation points or select Normal Mode";
+      }
+      
+      public function onNormal():void
+      {
+      	__interpolate__.enabled = (bz::MAX_KNOTS < 4 );
+      	__normal__.enabled      = false;
+      	
+      	bz::__mode = bz::NORMAL;
+      	if( bz::MAX_KNOTS < 4 )
+          __status__.text = "Normal Mode:  Click in draw area to select 3 control points or select Interpolate Mode";
+        else
+          __status__.text = "Normal Mode:  Click in draw area to select " + bz::MAX_KNOTS + " control points or select Interpolate Mode";
+      }
+      
+      public function onMove():void
+      {
+      	// record previous mode
+      	bz::__prevMode = bz::__mode;
+      	bz::__mode     = bz::MOVE;
+      	
+      	__status__.text = "Move - Select control point.";
+      }
+      
+      public function onArcLen():void
+      {
+        // compare naive arc length by discrete summation to numerical integration
+      	var len:Number = 0;
+
+        // use 'n' segments
+        var n:Number     = 100;
+        var delta:Number = 1/n;
+        for( var i:uint=1; i<=n; ++i )
+        {
+          var x1:Number = bz::__bezier.getX((i-1)*delta);
+          var y1:Number = bz::__bezier.getY((i-1)*delta);
+          var x2:Number = bz::__bezier.getX(i*delta);
+          var y2:Number = bz::__bezier.getY(i*delta);
+ 
+          var deltaX:Number = x2-x1;
+          var deltaY:Number = y2-y1;
+          
+          len += Math.sqrt(deltaX*deltaX + deltaY*deltaY);
+        }
+         
+        var arcLen:Number = bz::__bezier.arcLength();
+        
+        __status__.text = "Segment arc length: " + len + "  Numerical integration: " + arcLen;
+      }
+      
+      public function onReset():void
+      {
+      	// restore the application to its initial state, preparing for new control points
+      	__normal__.enabled      = false;
+      	__interpolate__.enabled = (bz::MAX_KNOTS < 4);
+      	__move__.enabled        = false;
+      	__reset__.enabled       = false;
+      	__arclen__.enabled      = false;
+      	__quad__.enabled        = false;
+      	__cubic__.enabled       = true;
+      	
+      	__status__.text = "Normal Mode:  Click in draw area to select control points or select Interpolate Mode";
+      	
+        bz::__curve.graphics.clear();
+        bz::__connect.graphics.clear();
+        bz::__bezier.reset();
+        
+        for( var i:uint=0; i<bz::MAX_KNOTS; ++i )
+        {
+          bz::__knots[i].destruct();
+          delete bz::__knots[i];
+          
+          delete bz::__controlPoints[i];
+        }
+        
+        bz::__controlPoints.splice(0);
+        bz::__knots.splice(0);
+        
+        bz::MAX_KNOTS  = 3;
+        bz::__mode     = bz::NORMAL;
+        bz::__prevMode = bz::NORMAL;
+        bz::__count    = 0;
+        bz::__selected = 0;
+        
+        bz::__bezier = bz::__factory.getInstance(3);
+        
+        bz::__drawArea.enableXHair();
+      }
+    ]]>
+  </mx:Script>
+	
+</mx:Application>

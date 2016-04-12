@@ -1,0 +1,417 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" applicationComplete="test()" width="600" height="500">
+  <mx:TextArea height="32" id="__status__" wordWrap="true" editable="false" top="10" left="23" right="22"/>
+  <mx:HSlider x="333" y="472" id="__angle__" allowTrackClick="false" minimum="0" maximum="360" enabled="false" thumbRelease="onSliderRelease()" change="onAngleChange(event)" liveDragging="true"/>
+  <mx:Label x="333" y="456" text="Rotation: " color="#ffffff" id="__label__" enabled="false" width="245"/>
+  <mx:Button x="226" y="464" label="Rotate" id="__rotate__" enabled="false" click="onRotate()"/>
+	
+	<mx:Script>
+    <![CDATA[
+    	import Singularity.Rigs.Connector;
+      import Singularity.Geom.Wedge;
+      import Singularity.Numeric.Consts;
+      
+      import Singularity.Rigs.BaseBone;
+      import Singularity.Rigs.Bone;
+      import Singularity.Rigs.Chain;
+      import Singularity.Rigs.Hand;
+      import Singularity.Rigs.Template;
+      
+      import flash.display.Sprite;
+      import flash.events.MouseEvent;
+      
+      import mx.controls.sliderClasses.Slider;
+      import mx.core.UIComponent;
+      import mx.events.SliderEvent;
+ 
+      // bone (bn) namespace - bone chain limited to three links for this example
+      public namespace bn;
+      
+      bn var __count:uint              = 0;                  // point counter
+      bn var __bone:Bone               = null;               // reference to a single bone
+      bn var __isBone:Boolean          = true;               // true if currently selected item is a Bone
+      bn var __chain:Chain             = new Chain();        // primary bone chain
+      bn var __hand:Hand               = null;               // connector representing a hand bone
+      bn var __lowerLimit:Array        = new Array();        // lower rotational limit for each bone
+      bn var __upperLimit:Array        = new Array();        // upper rotational limit for each bone
+      bn var __lowerHandLimit:Number   = -Consts.PI_8;       // lower rotational limit for hand connector
+      bn var __upperHandLimit:Number   = Consts.PI_8;        // upper rotational limit for hand connector
+
+      // user-interface (ui) namespace
+      public namespace ui;
+      ui var __stage:Stage             = null;
+      ui var __myReference:UIComponent = new UIComponent();  // UIComponent reference
+      ui var __track:Sprite            = new Sprite();
+      ui var __lowerWedges:Array       = new Array();        // illustrate lower joint limits
+      ui var __upperWedges:Array       = new Array();        // illustrate upper joint limits
+      ui var __lowerHandWedge:Wedge    = null;               // lower joint limit wedge for hand connector
+      ui var __upperHandWedge:Wedge    = null;               // upper joint limit wedge for hand connector
+      ui var __lowerHandShape:Shape    = new Shape();        // Shape containing lower limit wedge for hand
+      ui var __upperHandShape:Shape    = new Shape();        // Shape containing upper limit wedge for hand
+      ui var __lowerContainer:Array    = new Array();        // reference Shapes for each lower wedge
+      ui var __upperContainer:Array    = new Array();        // reference Shapes for each upper wedge
+      ui var __wedges:Sprite           = new Sprite();       // container for wedge graphics
+      ui var __low:Shape               = null;
+      ui var __up:Shape                = null;
+      ui var BLUE:Number               = 0xccccff;
+      ui var GREEN:Number              = 0xccffcc;
+      
+      public function test():void 
+      { 
+      	addChild(ui::__myReference);
+        ui::__myReference.addChild(bn::__chain);
+        ui::__myReference.addChild(ui::__track);
+        ui::__myReference.addChild(ui::__wedges);
+        
+        ui::__stage = ui::__track.stage;
+        
+        // define drawing area
+        var drawY:uint = __status__.y + __status__.height + 5;
+        var drawH:uint = __rotate__.y - drawY - 10;
+        
+        var g:Graphics = ui::__track.graphics;
+        g.lineStyle(1,0xffffff,.2);
+        g.beginFill(0xffffff,.2);
+        g.drawRect(0,drawY,ui::__stage.width,drawH);
+        
+        // set joint limits - root bone has unlimited rotation - limits are relative to bone initial orientation so all lower limits are negative.
+        bn::__lowerLimit[0] = -Consts.TWO_PI;
+        bn::__upperLimit[0] = Consts.TWO_PI;
+        
+        bn::__lowerLimit[1] = -Consts.PI_2;
+        bn::__upperLimit[1] = Consts.PI_4;
+        
+        bn::__lowerLimit[2] = -Consts.PI_4;
+        bn::__upperLimit[2] = Consts.PI_8;
+        
+        // Hand Template
+        var t:Template = new Template();
+        t.insert(0,20);
+        t.insert(25,50);
+        t.insert(85,60);
+        t.insert(100,35);
+        
+        // create hand separate from primary chain
+        bn::__hand = new Hand(8, 50, 15, 15, Hand.RIGHT, t, 0xcccccc, 0x0000ff);
+        bn::__hand.draw();
+        
+        ui::__myReference.addChild(bn::__hand);
+        
+        // notification of low-level bone interactivity from the chain
+        bn::__chain.setNotify(onBone);
+        
+        // register for selected event on the Connector
+        bn::__hand.register(BaseBone.BONE_SELECTED, onConnector);
+
+        ui::__track.addEventListener(MouseEvent.CLICK, onSelected);
+                
+        __status__.text = "Click anywhere to start drawing three bones.  Place them in nearly a straight line.";
+      }
+      
+      public function errHandler(_e:Event):void
+      {
+      	__status__.text = _e.toString();
+      }
+      
+      
+      // low-level bone interactivity
+      public function onBone(_c:Chain):void
+      {
+        switch( _c.mouseEvent )
+        {
+          case BaseBone.BONE_ROLL_OVER :
+            var b:Bone = _c.current;
+            if( b.IS_ROOT )
+              __status__.text = "Root Bone";
+            else if( b.IS_END )
+              __status__.text = "Terminal Bone";
+            else
+              __status__.text = b.NAME;
+          break;
+          
+          case BaseBone.BONE_ROLL_OUT :
+            __status__.text = "";
+          break;
+   
+          case BaseBone.BONE_SELECTED :
+            __status__.text    = "Selected Bone: " + _c.current.NAME;
+            bn::__bone         = _c.current;
+            bn::__isBone       = true;
+            __rotate__.enabled = true;
+
+            
+            if( ui::__low != null )
+              ui::__low.graphics.clear();
+            
+            if( ui::__up != null )
+               ui::__up.graphics.clear();
+               
+            var id:uint = bn::__bone.ID;
+            ui::__low   = ui::__lowerContainer[id];
+            ui::__up    = ui::__upperContainer[id];
+            ui::__lowerWedges[id].draw(ui::__low, 1, 0xff0000, ui::BLUE , 0.35);
+            ui::__upperWedges[id].draw(ui::__up , 1, 0x0000ff, ui::GREEN, 0.35);
+          break;
+        }
+      }
+      
+      public function onConnector(_c:Connector):void
+      {
+        __status__.text    = "Selected Hand Connector";
+        __rotate__.enabled = true;
+        bn::__isBone       = false;
+            
+        if( ui::__low != null )
+          ui::__low.graphics.clear();
+            
+        if( ui::__up != null )
+          ui::__up.graphics.clear();
+               
+        ui::__low = ui::__lowerHandShape;
+        ui::__up  = ui::__upperHandShape;
+        ui::__lowerHandWedge.draw(ui::__low, 1, 0xff0000, ui::BLUE , 0.35);
+        ui::__upperHandWedge.draw(ui::__up , 1, 0x0000ff, ui::GREEN, 0.35);
+      }
+      
+      public function trackMouse(_e:MouseEvent):void
+      {     	
+        bn::__bone.setTerminal(_e.localX,_e.localY);  
+      	bn::__bone.draw();	
+      }
+      
+      public function onSelected(_e:MouseEvent):void
+      {
+      	var pX:uint = _e.localX;
+      	var pY:uint = _e.localY;
+     	
+      	if( bn::__count == 0 )
+      	{
+      	  bn::__bone      = bn::__chain.createBone();      // newly created bone is now in display list
+      	  bn::__bone.NAME = "Bone"+bn::__count.toString();
+      	  bn::__bone.ID   = bn::__count;
+      	  
+      	  // completely turn off all internal mouse events until chain is completed
+      	  bn::__bone.disableMouseEvents();
+      	      
+      	  // initial joint coordinates
+      	  bn::__bone.setInitial(pX, pY);
+      	      
+          ui::__track.addEventListener(MouseEvent.MOUSE_MOVE, trackMouse);
+        }
+        else if( bn::__count == 3 ) 
+        {
+          //__status__.text = "Click a bone to see its rotational limits - select 'Rotate' to rotate the bone.";
+          
+          ui::__track.removeEventListener(MouseEvent.MOUSE_MOVE, trackMouse);
+      	  ui::__track.removeEventListener(MouseEvent.CLICK, onSelected);
+      	  ui::__track.visible = false;
+      	  
+      	  // terminate current bone
+      	  bn::__bone.setTerminal(pX, pY);
+      	  bn::__bone.draw();
+      	  
+      	  // link the hand connector to the chain
+      	  bn::__chain.link(bn::__hand, true);
+      	  
+      	  __assignLimits();
+      	  
+      	  bn::__chain.enabled = true;
+      	  
+      	  // no bone currently selected
+      	  bn::__bone = null;
+        }
+        else
+        {
+          ui::__track.removeEventListener(MouseEvent.MOUSE_MOVE, trackMouse);
+             
+          // terminate current bone
+      	  bn::__bone.setTerminal(pX, pY);
+      	  bn::__bone.draw();
+          
+      	  // begin new bone
+      	  bn::__bone      = bn::__chain.createBone();      // newly created bone is now in display list
+      	  bn::__bone.NAME = "Bone"+bn::__count.toString();
+      	  bn::__bone.ID   = bn::__count;
+      	   
+      	  bn::__bone.disableMouseEvents();
+      	  bn::__bone.setInitial(pX, pY);
+      	      
+          ui::__track.addEventListener(MouseEvent.MOUSE_MOVE, trackMouse);
+      	}
+        bn::__count++;
+      }
+      
+      private function __assignLimits():void
+      {
+        // create two wedges to illustrate lower and upper limits for each bone 
+        
+        // root bone is unlimited and has no parent orientation
+      	var b:Bone       = bn::__chain.getBone(0);
+      	var start:Number = b.angle;
+      	var end:Number   = start+bn::__lowerLimit[0];
+      	b.lowerLimit     = bn::__lowerLimit[0];
+      	b.upperLimit     = bn::__upperLimit[0];
+      	
+      	ui::__lowerWedges[0] = new Wedge(b.length, b.initX, b.initY, start, end);
+      	  
+      	end                  = start+bn::__upperLimit[0];
+      	ui::__upperWedges[0] = new Wedge(b.length, b.initX, b.initY, start, end);
+      	
+      	ui::__lowerContainer[0] = new Shape();
+      	ui::__wedges.addChild(ui::__lowerContainer[0]);
+      	
+      	ui::__upperContainer[0] = new Shape();
+      	ui::__wedges.addChild(ui::__upperContainer[0]);
+      	
+      	// second and third bones use parent bones for wedge orientation
+      	for( var i:uint=1; i<3; ++i )
+      	{
+      	  b               = bn::__chain.getBone(i);
+      	  var parent:Bone = bn::__chain.getBone(i-1);
+      	  start           = parent.angle;
+      	  end             = start+bn::__lowerLimit[i];
+      	  b.lowerLimit    = bn::__lowerLimit[i];
+      	  b.upperLimit    = bn::__upperLimit[i];
+      	
+      	  ui::__lowerWedges[i] = new Wedge(b.length, b.initX, b.initY, start, end);
+      	  
+      	  end                  = start+bn::__upperLimit[i];
+      	  ui::__upperWedges[i] = new Wedge(b.length, b.initX, b.initY, start, end);
+      	
+          ui::__lowerContainer[i] = new Shape();
+      	  ui::__wedges.addChild(ui::__lowerContainer[i]);
+      	
+      	  ui::__upperContainer[i] = new Shape();
+      	  ui::__wedges.addChild(ui::__upperContainer[i]);	
+      	} 
+      	
+      	// finish with hand connector
+      	var c:Connector = bn::__hand;
+      	c.lowerLimit    = bn::__lowerHandLimit;
+        c.upperLimit    = bn::__upperHandLimit;
+        
+      	start                = c.orientation;
+      	end                  = start+bn::__lowerHandLimit;
+      	ui::__lowerHandWedge = new Wedge(c.length, c.pivotX, c.pivotY, start, end);
+      	ui::__myReference.addChild(ui::__lowerHandShape);
+      	
+        end                  = start+bn::__upperHandLimit;
+        ui::__upperHandWedge = new Wedge(c.length, c.pivotX, c.pivotY, start, end);
+        ui::__myReference.addChild(ui::__upperHandShape);
+        
+        c.ENABLED = true;
+      }
+      
+      // rotate a bone
+      public function onRotate():void
+      {
+        __rotate__.enabled = false;
+        __label__.enabled  = true;
+        __angle__.enabled  = true;
+          
+        var angle:Number = 0;
+        if( bn::__isBone )
+          angle = bn::__bone.orientation*Consts.RAD_TO_DEG;
+        else
+          angle = bn::__hand.orientation*Consts.RAD_TO_DEG;
+          
+        __label__.text  = "Initial Rotation Angle: " + Math.round(angle).toString();
+        __angle__.value = angle;
+      }
+      
+      // process orientation changes from the slider
+      public function onAngleChange(_e:SliderEvent):void
+      {
+        var angle:Number = __angle__.value*Consts.DEG_TO_RAD;
+        
+        if( bn::__isBone )
+          bn::__bone.orientation = angle;
+        else
+        {
+          // with connectors (often linked to other connectors), the delta angle is often readily available
+          // in this case, using it is more cumbersome - probably need to add an orientation setter like the Bone class
+          var newAngle:Number   = (angle >= 0) ? angle  : Consts.TWO_PI+angle;
+          var deltaAngle:Number = newAngle - bn::__hand.orientation;
+          bn::__hand.offsetOrientation(deltaAngle);
+        }
+      }
+      
+      public function onSliderRelease():void
+      {
+        // mark previously selected bone as unselected and disable rotation selection
+        if( bn::__isBone )
+        {
+          bn::__bone.deselect();
+          __label__.enabled  = false;
+          __angle__.enabled  = false;
+        
+          // update wedge angles for all three bones
+          var b:Bone       = bn::__chain.getBone(0);
+          var start:Number = b.angle;
+      	  var end:Number   = start+bn::__lowerLimit[0];
+
+          var l:Wedge  = ui::__lowerWedges[0];
+          l.xC         = b.initX;
+          l.yC         = b.initY;
+          l.startAngle = start;
+          l.endAngle   = end;
+        
+          end          = start+bn::__upperLimit[0];
+          var u:Wedge  = ui::__upperWedges[0];
+          u.xC         = b.initX;
+          u.yC         = b.initY;
+          u.startAngle = start;
+          u.endAngle   = end;
+        
+          for( var i:uint=1; i<3; ++i )
+          {
+            b                = bn::__chain.getBone(i);
+            var parent:Bone  = bn::__chain.getBone(i-1);
+            start            = parent.angle;
+      	    end              = start+bn::__lowerLimit[i];
+
+            l            = ui::__lowerWedges[i];
+            l.xC         = b.initX;
+            l.yC         = b.initY;
+            l.startAngle = start;
+            l.endAngle   = end;
+        
+            end          = start+bn::__upperLimit[i];
+            u            = ui::__upperWedges[i];
+            u.xC         = b.initX;
+            u.yC         = b.initY;
+            u.startAngle = start;
+            u.endAngle   = end;
+          }
+        }
+        
+        var c:Connector                 = bn::__hand;
+        parent                          = bn::__chain.getBone(2);
+      	start                           = parent.orientation;
+      	end                             = start+bn::__lowerHandLimit;
+      	ui::__lowerHandWedge.startAngle = start;
+      	ui::__lowerHandWedge.endAngle   = end;
+        ui::__lowerHandWedge.xC         = c.pivotX;
+      	ui::__lowerHandWedge.yC         = c.pivotY;
+      	
+        end                             = start+bn::__upperHandLimit;
+        ui::__upperHandWedge.startAngle = start;
+      	ui::__upperHandWedge.endAngle   = end;
+      	ui::__upperHandWedge.xC         = c.pivotX;
+      	ui::__upperHandWedge.yC         = c.pivotY;
+        
+        // only redraw the wedges corresponding to the selected object
+        if( bn::__isBone )
+        {
+          var id:uint = bn::__bone.ID;
+          __status__.text = "ID: " + id;
+          ui::__lowerWedges[id].draw(ui::__lowerContainer[id], 1, 0xff0000, ui::BLUE , 0.35);
+          ui::__upperWedges[id].draw(ui::__upperContainer[id], 1, 0x0000ff, ui::GREEN, 0.35);
+        }
+      }
+      
+    ]]>
+  </mx:Script>
+
+	
+</mx:Application>

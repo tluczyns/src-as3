@@ -1,0 +1,253 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application 
+	xmlns:mx="http://www.adobe.com/2006/mxml" 
+	xmlns:p3dflex="org.papervision3d.flex.*"
+	layout="vertical"
+	pageTitle="PaperVision3D Path Animation (Flex) Example"
+	frameRate="24"
+	applicationComplete="initPV3D()">
+	
+	<!-- Make sure the Canvas3D.as file is in the org.papervision3d.flex folder -->
+	
+    <mx:Panel id="mainPanel" title="PaperVision3D Path Animation from 3ds max">
+      <p3dflex:Canvas3D id="p3dCanvas" backgroundColor="#000000" backgroundAlpha="1" width="580" height="435"/>	
+	</mx:Panel>
+	<mx:Button label="Animate" id="__animate__" enabled="true" click="onAnimate()"/>
+	<mx:Button label="Observe Marker" id="__marker__" enabled="false" click="observeMarker()"/>
+	<mx:Button label="Observe Origin" id="__origin__" enabled="false" click="observeOrigin()"/>
+	
+	<mx:Script>
+      <![CDATA[
+        // Papervision
+        import org.papervision3d.cameras.Camera3D;
+        import org.papervision3d.materials.ColorMaterial;
+        import org.papervision3d.materials.WireframeMaterial;
+        import org.papervision3d.objects.DisplayObject3D;
+        import org.papervision3d.objects.Cube;
+        import org.papervision3d.objects.Sphere;
+        import org.papervision3d.scenes.Scene3D;
+        import org.papervision3d.examples.Figure8;
+        
+        import Singularity.Events.SingularityEvent;
+        import Singularity.Geom.P3D.BezierSpline;
+        import Singularity.Numeric.Consts;
+			
+        // Namespace for all Papervision 3D stuff 
+        public namespace p3d;
+        p3d var __scene:Scene3D;             // our friendly, neighborhood PV3D scene
+        p3d var __camera:Camera3D;           // static camera, to view marker animation
+        p3d var __observer:Camera3D;         // camera moves with marker, observes the origin
+        p3d var __rootNode:DisplayObject3D;  // don't leave home without a root node :)
+        p3d var __marker:Cube;               // a marker to move along the 3D path
+        p3d var __xAxis:Cube;                // representation of x-axis
+        p3d var __yAxis:Cube;                // representation of y-axis
+        p3d var __zAxis:Cube;                // representation of z-axis
+        
+        // Namespace for all data and animation objects
+        public namespace obj;
+        obj var __myXML:XML           = new XML();
+        obj var __myLoader:URLLoader  = new URLLoader();
+        obj var __spline:BezierSpline = new BezierSpline();
+        obj var __static:Boolean      = true;              // static view (true) or observer (moving camera) view (false)
+        
+        // animation control
+        public namespace ani;
+        ani var __stage:Stage   = null;
+        ani var __t:Number      = 0;
+        ani var __deltaT:Number = 0.005;
+		
+        public function initPV3D():void
+		{ 
+          setupScene();
+          
+          // spline parameterization
+          obj::__spline.parameterize = Consts.ARC_LENGTH;
+          
+          // retrieve spline data from splinedata.xml file
+          obj::__myLoader.addEventListener("complete", xmlLoaded);
+          obj::__myLoader.load(new URLRequest("camerapath.xml"));
+          
+          p3d::__scene.renderCamera(p3d::__camera);
+        }
+        
+        public function setupScene():void
+        {
+          p3d::__scene = new Scene3D(p3dCanvas.canvas);
+          
+          ani::__stage = p3dCanvas.stage;
+
+          p3d::__camera       = new Camera3D();
+	      p3d::__camera.x     = 800;
+	      p3d::__camera.y     = 800;
+	      p3d::__camera.z     = 1000;
+	      p3d::__camera.zoom  = 15;
+	      p3d::__camera.focus = 100;
+	      
+	      p3d::__observer       = new Camera3D();
+	      p3d::__observer.x     = 800;
+	      p3d::__observer.y     = 800;
+	      p3d::__observer.z     = 1000;
+	      p3d::__observer.zoom  = 10;
+	      p3d::__observer.focus = 100;
+
+          var sphereMaterial:WireframeMaterial = new WireframeMaterial( 0xffffff );
+	      var xAxisMaterial:ColorMaterial      = new ColorMaterial( 0xff9900 );
+          var yAxisMaterial:ColorMaterial      = new ColorMaterial( 0x6699cc );
+          var zAxisMaterial:ColorMaterial      = new ColorMaterial( 0xffffff );
+			
+		  // something to look at :)
+          var sphere:Sphere = new Sphere( sphereMaterial, 20, 16, 16 );
+          p3d::__rootNode = p3d::__scene.addChild( sphere, "root" );
+			
+          // display 'axes'
+          p3d::__xAxis  = new Cube(xAxisMaterial, 500, 2, 2);
+          p3d::__xAxis.rotationY = 90;
+						
+          p3d::__yAxis  = new Cube(yAxisMaterial, 500, 2, 2);
+          p3d::__yAxis.rotationX = 90;
+			
+          p3d::__zAxis  = new Cube(zAxisMaterial, 500, 2, 2);
+			
+          p3d::__scene.addChild(p3d::__xAxis, "xAxis");
+          p3d::__scene.addChild(p3d::__yAxis, "yAxis");
+          p3d::__scene.addChild(p3d::__zAxis, "zAxis");
+          
+          var sphere1:Sphere = new Sphere(sphereMaterial, 10, 16, 16 );
+          sphere1.x   = 100;
+          p3d::__scene.addChild(sphere1, "sphere1");
+          
+          var sphere2:Sphere = new Sphere(sphereMaterial, 10, 16, 16 );
+          sphere2.y   = 100;
+          p3d::__scene.addChild(sphere2, "sphere2");
+          
+          var sphere3:Sphere = new Sphere(sphereMaterial, 10, 16, 16 );
+          sphere3.z   = 100;
+          p3d::__scene.addChild(sphere3, "sphere3");
+          
+          p3d::__marker         = new Cube( new ColorMaterial( 0xff0000 ), 5, 5, 5);
+          p3d::__marker.visible = false;
+          
+          p3d::__scene.addChild(p3d::__marker, "marker");
+ 
+          // NOTE:  This is a fixed framing, not one based on the extent of the spline data
+          p3d::__camera.target   = sphere;
+          p3d::__observer.target = sphere;
+	      p3d::__scene.renderCamera(p3d::__camera);
+        }
+        
+        // create spline from xml data
+        public function xmlLoaded(_e:Event):void
+        {
+          obj::__myXML = XML(obj::__myLoader.data);
+          obj::__spline.closed = obj::__myXML.@closed == "true";
+          
+          var numKnots:Number = obj::__myXML.@knots;
+          var knots:XMLList   = obj::__myXML.knot;
+          var inVec:XMLList   = obj::__myXML.knot.invec;
+          var outVec:XMLList  = obj::__myXML.knot.outvec;
+          
+          for( var i:uint=0; i<numKnots; ++i )
+          {
+            var k:XML      = knots[i];
+            var myX:Number = Number(k.@x);
+            var myY:Number = Number(k.@y);
+            var myZ:Number = Number(k.@z);
+            
+            obj::__spline.addControlPoint(myX, myY, myZ);
+            
+            myX = Number(inVec[i].@x);
+            myY = Number(inVec[i].@y);
+            myZ = Number(inVec[i].@z);
+            
+            obj::__spline.inTangent(i, myX, myY, myZ);
+            
+            myX = Number(outVec[i].@x);
+            myY = Number(outVec[i].@y);
+            myZ = Number(outVec[i].@z);
+            
+            obj::__spline.outTangent(i, myX, myY, myZ);
+          }
+        }
+        
+        public function onAnimate():void
+        {
+          __animate__.enabled = false;
+          
+          ani::__t = 0;
+          
+          // position marker at first knot
+          p3d::__marker.x = obj::__spline.getX(0);
+          p3d::__marker.y = obj::__spline.getY(0);
+          p3d::__marker.z = obj::__spline.getZ(0);
+          
+          p3d::__marker.visible = true;
+          p3d::__scene.renderCamera(p3d::__camera);
+          
+          __marker__.enabled = false;
+          __origin__.enabled = true;
+           
+          ani::__stage.addEventListener(Event.ENTER_FRAME, animObject);
+        }
+        
+        public function animObject(_e:Event):void
+        {
+          ani::__t += ani::__deltaT;
+           
+          if( ani::__t <= 1.0 )
+          {
+            var myX:Number = obj::__spline.getX(ani::__t);
+            var myY:Number = obj::__spline.getY(ani::__t);
+            var myZ:Number = obj::__spline.getZ(ani::__t);
+            
+            p3d::__marker.x = myX;
+            p3d::__marker.y = myY;
+            p3d::__marker.z = myZ;
+            
+            p3d::__observer.x = myX;
+            p3d::__observer.y = myY;
+            p3d::__observer.z = myZ;
+          
+            if( obj::__static )
+            {
+              p3d::__xAxis.visible = true;
+              p3d::__yAxis.visible = true;
+              p3d::__zAxis.visible = true;
+              p3d::__scene.renderCamera(p3d::__camera);
+            }
+            else
+            {
+              p3d::__xAxis.visible = false;
+              p3d::__yAxis.visible = false;
+              p3d::__zAxis.visible = false;
+              p3d::__scene.renderCamera(p3d::__observer);
+            }
+          }
+          else
+          {
+            ani::__stage.removeEventListener(Event.ENTER_FRAME, animObject);
+            __animate__.enabled = true;
+             obj::__static      = true;
+            __marker__.enabled  = false;
+            __origin__.enabled  = false;
+          }
+        }
+        
+        // which camera is used?  static (observing marker) or path-animated (observing origin).
+        public function observeMarker():void
+        {
+          obj::__static      = true;
+          __marker__.enabled = false;
+          __origin__.enabled = true;
+        }
+        
+        public function observeOrigin():void
+        {
+          obj::__static      = false;
+          __marker__.enabled = true;
+          __origin__.enabled = false;
+        } 
+      ]]>
+	</mx:Script>
+	
+</mx:Application>
+

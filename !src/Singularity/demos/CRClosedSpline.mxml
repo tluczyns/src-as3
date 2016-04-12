@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" applicationComplete="test()" width="600" height="500">
+  <mx:TextArea height="26" id="__status__" wordWrap="true" editable="false" top="10" left="23" right="22"/>
+  <mx:Button x="96" y="468" label="Reset" id="__reset__" enabled="false" click="onReset()"/>
+  <mx:Button x="23" y="468" label="Draw" id="__draw__" enabled="false" click="onDraw()"/>
+	
+	<mx:Script>
+    <![CDATA[
+      import Singularity.Geom.CatmullRom;
+      import Singularity.Numeric.Consts;
+      import Singularity.Geom.Knot;
+     
+      import Singularity.Events.SingularityEvent;
+
+      import Singularity.Interactive.PointSelector;
+      
+      import mx.core.UIComponent;
+      
+      import flash.display.Shape;
+      import flash.display.Sprite;
+      
+      // catmull-rom spline (crs) namespace
+      public namespace crs;
+      
+      crs var __spline:CatmullRom       = new CatmullRom();   // parametric spline reference
+      crs var __count:uint              = 0;                  // count number of control points
+      crs var __knots:Array             = new Array();        // collection of Knot references
+      crs var __markers:Array           = new Array();        // collection at markers distributed along spline
+
+      public namespace ui;
+
+      ui var __connect:Shape            = new Shape();        // lines connecting the control points
+      ui var __curve:Shape              = new Shape();        // spline curve drawn in this Shape
+      ui var __drawKnots:Sprite         = new Sprite();       // knots drawn here
+      ui var __plotMarkers:Sprite       = new Sprite();       // markers drawn here
+      ui var __drawArea:PointSelector   = null;               // reference to point-selector
+      ui var __myReference:UIComponent  = new UIComponent();  // UIComponent reference
+      
+      public function test():void
+      { 
+      	addChild(ui::__myReference);
+      	        
+        crs::__spline.addEventListener(SingularityEvent.ERROR, errHandler);
+        crs::__spline.container = ui::__curve;
+        crs::__spline.closed    = true;
+        
+        // define drawing area - use top of normal button for bottom level
+        var drawX:uint = __status__.x;
+        var drawY:uint = __status__.y + __status__.height + 5;
+        var drawW:uint = __status__.width;
+        var drawH:uint = __draw__.y - drawY - 10;
+        
+        ui::__drawArea = new PointSelector(drawX, drawY, drawW, drawH, 0xcccccc);
+        ui::__drawArea.addEventListener(SingularityEvent.SELECTED, onSelected);
+        
+        ui::__plotMarkers.visible = false;
+        var k1:Knot       = new Knot(8, 0xff0000);
+        k1.x              = 0;
+        k1.y              = 0;
+        crs::__markers[0] = k1;
+        ui::__plotMarkers.addChild(k1);
+        
+        var k2:Knot       = new Knot(8, 0x00ff00);
+        k2.x              = 0;
+        k2.y              = 0;
+        crs::__markers[1] = k2;
+        ui::__plotMarkers.addChild(k2);
+        
+        ui::__myReference.addChild(ui::__drawArea);
+        ui::__myReference.addChild(ui::__curve);
+        ui::__myReference.addChild(ui::__connect);
+        ui::__myReference.addChild(ui::__drawKnots);
+        ui::__myReference.addChild(ui::__plotMarkers);
+        
+        __status__.text = "Click in draw area to select at least four knots, then click 'Draw' to close and draw the spline";
+      }
+      
+      public function errHandler(_e:Event):void
+      {
+      	__status__.text = _e.toString();
+      }
+      
+      public function onKnotRollOver(_e:Event):void
+      {
+        __status__.text = "Knot: " + _e.target.id;
+      }
+      
+      public function onKnotRollOut(_e:SingularityEvent):void
+      {
+
+      }
+      
+      public function onKnotSelected(_e:Event):void
+      {
+ 
+      }
+      
+      public function onSelected(_e:SingularityEvent):void
+      {
+      	var p:PointSelector = PointSelector(_e.target);
+      	
+      	var pX:uint = p.selectedX;
+      	var pY:uint = p.selectedY;
+      	                
+        var knot:Knot = new Knot(6, 0xffcccc);
+        knot.addEventListener( SingularityEvent.ROLL_OVER, onKnotRollOver );
+        knot.addEventListener( SingularityEvent.ROLL_OUT , onKnotRollOut  );
+        knot.addEventListener( SingularityEvent.SELECTED , onKnotSelected );
+        
+        crs::__spline.addControlPoint(pX,pY);
+        crs::__knots.push(knot);
+        
+        knot.id = crs::__count++;
+        knot.x  = pX;
+        knot.y  = pY;
+        
+        __draw__.enabled = crs::__count >= 4;
+        
+        ui::__drawKnots.addChild(knot);
+      }
+      
+      public function onDraw():void
+      {
+      	connectKnots();
+      	
+      	ui::__drawArea.disableXHair();
+        
+        crs::__spline.draw(1.0);
+        
+        var o:Object = crs::__spline.getControlPoint(0);
+        var k1:Knot  = crs::__markers[0];
+        k1.x         = o.X;
+        k1.y         = o.Y;
+        
+        o           = crs::__spline.getControlPoint(1);
+        var k2:Knot = crs::__markers[1];
+        k2.x        = o.X;
+        k2.y        = o.Y;
+        
+        ui::__plotMarkers.visible = true;
+        
+        __reset__.enabled  = true;
+        __draw__.enabled   = false;
+      }
+      
+      public function connectKnots():void
+      {
+      	var g:Graphics = ui::__connect.graphics;
+      	g.clear();
+      	g.lineStyle(0,0x000000);
+      	g.moveTo(crs::__knots[0].x, crs::__knots[0].y);
+      	
+      	for( var i:uint=1; i<crs::__count; ++i )
+      	  g.lineTo(crs::__knots[i].x, crs::__knots[i].y);
+      	  
+        g.lineTo(crs::__knots[0].x, crs::__knots[0].y);
+      }
+      
+      public function onReset():void
+      {
+      	// restore the application to its initial state, preparing for new control points
+      	__reset__.enabled = false;
+      	__draw__.enabled  = false;
+      
+      	ui::__plotMarkers.visible = false;
+      	
+      	__status__.text = "Click in draw area to select at least four knots, then click 'Draw' to close and draw the spline";
+      	
+        ui::__curve.graphics.clear();
+        ui::__connect.graphics.clear();
+        crs::__spline.reset();
+        
+        for( var i:uint=0; i<crs::__count; ++i )
+        {
+          crs::__knots[i].destruct();
+          delete crs::__knots[i];
+        }
+        
+        crs::__knots.splice(0);
+        
+        crs::__count = 0;
+        
+        ui::__drawArea.enableXHair();
+      }
+    ]]>
+  </mx:Script>
+	
+</mx:Application>
+
+
+

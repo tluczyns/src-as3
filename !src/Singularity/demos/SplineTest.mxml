@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" applicationComplete="test()" width="600" height="500">
+  <mx:TextArea height="480" id="__status__" wordWrap="true" editable="false" top="10" left="23" right="22"/>
+	
+	<mx:Script>
+    <![CDATA[
+      import Singularity.Geom.Spline3;
+      import Singularity.Events.SingularityEvent;
+      
+      // cubic spline (cs3) namespace
+      public namespace cs3;
+      
+      cs3 var __mySpline:Spline3 = new Spline3();
+      
+      public function test():void 
+      { 
+        cs3::__mySpline.addEventListener(SingularityEvent.ERROR, errHandler);
+       
+        // add knots
+        cs3::__mySpline.addControlPoint(0.0, -0.80);
+        cs3::__mySpline.addControlPoint(0.6, -0.34);
+        cs3::__mySpline.addControlPoint(1.5, 0.59);
+        cs3::__mySpline.addControlPoint(1.7,  0.59);
+        cs3::__mySpline.addControlPoint(1.9,  0.23);
+        cs3::__mySpline.addControlPoint(2.1,  0.10);
+        cs3::__mySpline.addControlPoint(2.3,  0.28);
+        cs3::__mySpline.addControlPoint(2.6,  1.03);
+        cs3::__mySpline.addControlPoint(2.8,  1.50);
+        cs3::__mySpline.addControlPoint(3.0,  1.44);
+        cs3::__mySpline.addControlPoint(3.6,  0.74);
+        cs3::__mySpline.addControlPoint(4.7, -0.82);
+        cs3::__mySpline.addControlPoint(5.2, -1.27);
+        cs3::__mySpline.addControlPoint(5.7, -0.92);
+        cs3::__mySpline.addControlPoint(5.8, -0.92);
+        cs3::__mySpline.addControlPoint(6.0, -1.04);
+        cs3::__mySpline.addControlPoint(6.4, -0.79);
+        cs3::__mySpline.addControlPoint(6.9, -0.06);
+        cs3::__mySpline.addControlPoint(7.6,  1.00);
+        cs3::__mySpline.addControlPoint(8.0,  0.00);
+
+        // interpolation
+        var myString:String = "interpolation - knot set 1\n";
+        for( var i:uint=0; i<8; ++i )
+        {
+          var x:Number = i*0.5;
+          myString    += "x: " + x + "   y: " + cs3::__mySpline.eval(x).toString() + "\n";
+        }
+
+        // note - no z-computation between these loops
+        for( i=9; i<17; ++i )
+        {
+          x         = i*0.5;
+          myString += "x: " + x + "   y: " + cs3::__mySpline.eval(x).toString() + "\n";
+        }
+
+        // remove one of the knots
+        cs3::__mySpline.removeKnotAtX(1.7);
+
+        myString += "\n\n";
+
+        // re-interpolate in first half of original range -- note only minor difference
+        for( i=0; i<17; ++i )
+        {
+          x         = i*0.25;
+          myString += "x: " + x + "   y: " + cs3::__mySpline.eval(x).toString() + "\n";
+        }
+        
+        __status__.text = myString;   
+      }
+      
+      public function errHandler(_e:Event):void
+      {
+      	__status__.text = _e.toString();
+      }
+    ]]>
+  </mx:Script>
+	
+</mx:Application>
+

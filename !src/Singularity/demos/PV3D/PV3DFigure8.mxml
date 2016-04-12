@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application 
+	xmlns:mx="http://www.adobe.com/2006/mxml" 
+	xmlns:p3dflex="org.papervision3d.flex.*"
+	layout="vertical"
+	pageTitle="PaperVision3D Path Animation (Flex) Example"
+	frameRate="24"
+	applicationComplete="initPV3D()">
+	
+	<!-- Make sure the Canvas3D.as file is in the org.papervision3d.flex folder -->
+	
+    <mx:Panel id="mainPanel" title="PaperVision3D Path Animation (Flex) Example">
+      <p3dflex:Canvas3D id="p3dCanvas" backgroundColor="#000000" backgroundAlpha="1" width="580" height="435"/>	
+	</mx:Panel>
+	<mx:Button label="Animate" id="__animate__" enabled="true" click="onAnimate()"/>
+	
+	<mx:Script>
+      <![CDATA[
+        // Papervision
+        import org.papervision3d.cameras.Camera3D;
+        import org.papervision3d.materials.ColorMaterial;
+        import org.papervision3d.objects.DisplayObject3D;
+        import org.papervision3d.objects.Cube;
+        import org.papervision3d.objects.Sphere;
+        import org.papervision3d.scenes.Scene3D;
+        import org.papervision3d.examples.Figure8;
+        
+        import Singularity.Events.SingularityEvent;
+        import Singularity.Geom.P3D.Composite;
+			
+        // Namespace for all Papervision 3D stuff 
+        public namespace p3d;
+        p3d var __scene:Scene3D;
+        p3d var __camera:Camera3D;
+        p3d var __rootNode:DisplayObject3D;
+        
+        // Namespace for all objects used in the animation
+        public namespace obj;
+        obj var __figure8XY:Figure8 = new Figure8(Composite.XY);  // figure-8 in XY plane
+        obj var __figure8XZ:Figure8 = new Figure8(Composite.XZ);  // figure-8 in XZ plane
+        obj var __figure8YZ:Figure8 = new Figure8(Composite.YZ);  // figure-8 in YZ plane
+        obj var __complete:Number   = 0;                          // count completed figure-8's
+        
+        // animation control
+        public namespace ani;
+        ani var __stage:Stage = null;
+		
+        public function initPV3D():void
+		{ 
+          setupScene();
+          
+          obj::__figure8XY.addEventListener(SingularityEvent.COMPLETE, onComplete);
+          obj::__figure8XZ.addEventListener(SingularityEvent.COMPLETE, onComplete);
+          obj::__figure8YZ.addEventListener(SingularityEvent.COMPLETE, onComplete);
+          
+          obj::__figure8XY.addToScene(0, 0, 350, p3d::__scene, new ColorMaterial( 0xff0000 ));
+          obj::__figure8XZ.addToScene(0, 0, 350, p3d::__scene, new ColorMaterial( 0xffffff ));
+          obj::__figure8YZ.addToScene(0, 0, 350, p3d::__scene, new ColorMaterial( 0x0000ff ));
+          
+          p3d::__scene.renderCamera(p3d::__camera);
+        }
+        
+        public function setupScene():void
+        {
+          p3d::__scene = new Scene3D(p3dCanvas.canvas);
+          
+          ani::__stage = p3dCanvas.stage;
+          trace( ani::__stage );
+
+          p3d::__camera       = new Camera3D();
+	      p3d::__camera.x     = 1000;
+	      p3d::__camera.y     = 1000;
+	      p3d::__camera.z     = 1400;
+	      p3d::__camera.zoom  = 10;
+	      p3d::__camera.focus = 100;
+
+          var sphereMaterial:ColorMaterial = new ColorMaterial( 0xffffff );
+	      var xAxisMaterial:ColorMaterial  = new ColorMaterial( 0xff9900 );
+          var yAxisMaterial:ColorMaterial  = new ColorMaterial( 0x6699cc );
+          var zAxisMaterial:ColorMaterial  = new ColorMaterial( 0xffffff );
+			
+		  // something to look at :)
+          var sphere:Sphere = new Sphere( sphereMaterial, 10, 6, 6 );
+          p3d::__rootNode = p3d::__scene.addChild( sphere, "root" );
+			
+          // display 'axes'
+          var xAxis:Cube  = new Cube(xAxisMaterial, 1000, 5, 5);
+          xAxis.rotationY = 90;
+						
+          var yAxis:Cube  = new Cube(yAxisMaterial, 1000, 5, 5);
+          yAxis.rotationX = 90;
+			
+          var zAxis:Cube  = new Cube(zAxisMaterial, 1000, 5, 5);
+			
+          p3d::__scene.addChild(xAxis, "xAxis");
+          p3d::__scene.addChild(yAxis, "yAxis");
+          p3d::__scene.addChild(zAxis, "zAxis");
+
+          p3d::__camera.target = sphere;
+	      p3d::__scene.renderCamera(p3d::__camera);
+        }
+        
+        public function onAnimate():void
+        {
+          __animate__.enabled = false;
+          obj::__complete     = 0;
+          
+          obj::__figure8XY.initAnimation();
+          obj::__figure8XZ.initAnimation();
+          obj::__figure8YZ.initAnimation();
+          
+          ani::__stage.addEventListener(Event.ENTER_FRAME, animMarkers);
+        }
+        
+        public function animMarkers(_e:Event):void
+        {
+          obj::__figure8XY.updateAnimation();
+          obj::__figure8XZ.updateAnimation();
+          obj::__figure8YZ.updateAnimation();
+          
+          p3d::__scene.renderCamera(p3d::__camera);
+        }
+        
+        public function onComplete(_e:SingularityEvent):void
+        {
+          // are all three figure-8's finished?
+          if( ++obj::__complete == 3 )
+          {
+            ani::__stage.removeEventListener(Event.ENTER_FRAME, animMarkers);
+            __animate__.enabled = true;
+          }
+        }
+      ]]>
+	</mx:Script>
+	
+</mx:Application>

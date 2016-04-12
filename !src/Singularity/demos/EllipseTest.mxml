@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" applicationComplete="test()" width="600" height="500">
+  <mx:TextArea height="26" id="__status__" wordWrap="true" editable="false" top="10" left="23" right="22"/>
+  <mx:Button x="86" y="468" label="Arc Length" id="__arclen__" enabled="false" click="onArcLen()"/>
+  <mx:Button x="248" y="468" label="Reset" id="__reset__" enabled="false" click="onReset()"/>
+  <mx:Button x="23" y="468" label="Polar" id="__polar__" enabled="false" click="onPolar()"/>
+	
+	<mx:Script>
+    <![CDATA[
+      import Singularity.Numeric.Consts;
+      import Singularity.Geom.Ellipse;
+      import Singularity.Geom.Knot;
+     
+      import Singularity.Events.SingularityEvent;
+
+      import Singularity.Interactive.RectangleSelector;
+
+      import Singularity.Numeric.Consts;
+            
+      import mx.core.UIComponent;
+      
+      import flash.display.Shape;
+      import flash.display.Sprite;
+      
+      // arc-length parametrized ellipse (ae) namespace
+      public namespace ae;
+      
+      ae var NUM_MARKERS:uint             = 20;                 // total number of markers
+      ae var __ellipse:Ellipse            = new Ellipse();      // ellipse reference
+      ae var __knots:Array                = new Array();        // collection of Knot references
+      ae var __markers:Array              = new Array();        // collection of markers distributed around ellipse
+      ae var __plotMarkers:Sprite         = new Sprite();       // markers drawn in this sprite
+      ae var __drawEllipse:Shape          = new Shape();        // ellipse drawn here
+      ae var __drawArea:RectangleSelector = null;               // reference to point-selector
+      ae var __myReference:UIComponent    = new UIComponent();  // UIComponent reference
+      
+      public function test():void 
+      { 
+      	addChild(ae::__myReference);
+      	        
+        ae::__ellipse.addEventListener(SingularityEvent.ERROR, errHandler);
+        ae::__ellipse.container = ae::__drawEllipse;
+        
+        // define drawing area - use top of normal button for bottom level
+        var drawX:uint = __status__.x;
+        var drawY:uint = __status__.y + __status__.height + 5;
+        var drawW:uint = __status__.width;
+        var drawH:uint = __reset__.y - drawY - 10;
+        
+        // generate 20 markers to be distributed along the spline (illustrating difference between uniform and arc-length parametrization)
+        ae::__plotMarkers.visible = false;
+        for( var i:uint=0; i<ae::NUM_MARKERS; ++i )
+        {
+          var knot:Knot    = new Knot(8, 0xccffcc);
+          ae::__markers[i] = knot;
+          ae::__plotMarkers.addChild(knot);
+        }
+        
+        ae::__drawArea = new RectangleSelector(drawX, drawY, drawW, drawH, 0xcccccc, true);
+        ae::__drawArea.addEventListener(SingularityEvent.COMPLETE, onRectangleComplete);
+        
+        ae::__myReference.addChild(ae::__drawArea);
+        ae::__myReference.addChild(ae::__drawEllipse);
+        ae::__myReference.addChild(ae::__plotMarkers);
+        
+        __status__.text = "Drag in draw angle to define ellipse boundaries";
+      }
+      
+      public function errHandler(_e:Event):void
+      {
+      	__status__.text = _e.toString();
+      }
+      
+      public function onRectangleComplete(_e:SingularityEvent):void
+      {
+      	ae::__drawArea.disable();
+          
+        // set the relevant ellipse parameters
+        var s:RectangleSelector = RectangleSelector(_e.target);
+        var xL:uint             = s.xLeft;
+        var xR:uint             = s.xRight;
+        var yL:uint             = s.yLeft;
+        var yR:uint             = s.yRight;
+        var a:uint              = Math.round(0.5*(xR-xL));
+        var b:uint              = Math.round(0.5*(yR-yL));
+ 
+        ae::__ellipse.xC        = xL+a;
+        ae::__ellipse.yC        = yL+b;
+        ae::__ellipse.semimajor = a;
+        ae::__ellipse.semiminor = b;
+        
+        // draw entire ellipse
+        ae::__ellipse.draw();
+            
+        __reset__.enabled  = true;
+        __arclen__.enabled = true;
+        __polar__.enabled  = true;
+      }
+      
+      public function onArcLen():void
+      {
+      	__arclen__.enabled  = false;
+      	__polar__.enabled = true;
+      	
+        ae::__ellipse.parameterize = Consts.ARC_LENGTH;
+        
+        // distribute markers at equal intervals of arc length
+        var deltaS:Number = 1/Number(ae::NUM_MARKERS);
+        var count:uint    = ae::NUM_MARKERS
+        for( var i:uint=0, s:Number=0; i<count; ++i, s+=deltaS )
+        {
+          var k:Knot = ae::__markers[i];
+          k.x        = ae::__ellipse.getX(s);
+          k.y        = ae::__ellipse.getY(s);
+        }
+        
+        ae::__plotMarkers.visible = true;
+      }
+      
+      public function onPolar():void
+      {
+      	__arclen__.enabled = true;
+      	__polar__.enabled  = false;
+      	
+        ae::__ellipse.parameterize = Consts.POLAR;
+        
+        // distribute markers at equal intervals of equal parameter value (parameter in range [0,2pi])
+        var deltaT:Number = Consts.TWO_PI/Number(ae::NUM_MARKERS);
+        var count:uint    = ae::NUM_MARKERS
+        for( var i:uint=0, t:Number=0; i<count; ++i, t+=deltaT )
+        {
+          var k:Knot = ae::__markers[i];
+          k.x        = ae::__ellipse.getX(t);
+          k.y        = ae::__ellipse.getY(t);
+        }
+        
+        ae::__plotMarkers.visible = true;
+      }
+      
+      public function onReset():void
+      {
+      	// restore the application to its initial state, preparing for new control points
+      	__reset__.enabled  = false;
+      	__arclen__.enabled = false;
+      	__polar__.enabled  = false;
+      
+        ae::__ellipse.parameterize = Consts.POLAR;	
+      	ae::__plotMarkers.visible = false;
+      	ae::__drawArea.enable();
+      	
+        ae::__drawEllipse.graphics.clear();
+      
+        __status__.text = "Drag in draw angle to define ellipse boundaries";
+      }
+      
+      
+    ]]>
+  </mx:Script>
+	
+</mx:Application>
+

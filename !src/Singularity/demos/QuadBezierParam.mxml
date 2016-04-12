@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" applicationComplete="test()" width="600" height="500">
+  <mx:TextArea height="26" id="__status__" wordWrap="true" editable="false" top="10" left="23" right="22"/>
+	
+	<mx:Script>
+    <![CDATA[
+      import Singularity.Geom.Parametric;
+      import Singularity.Geom.Bezier2;
+      import Singularity.Geom.Knot;
+     
+      import Singularity.Events.SingularityEvent;
+
+      import Singularity.Interactive.PointSelector;
+      
+      import Singularity.Numeric.Consts;
+      
+      import mx.core.UIComponent;
+      
+      import flash.display.Shape;
+      
+      // bezier (bz) namespace
+      public namespace bz;
+      
+      bz var __bezier:Bezier2          = new Bezier2();      // Quad Bezier (normal parameterization)
+      bz var __bezierArc:Bezier2       = new Bezier2();      // Quad Bezier (arc-length parameterization)
+      bz var __count:uint              = 0;                  // count number of control points
+      bz var __knots:Array             = new Array();        // collection of Knot references
+      bz var __tMarkers:Array          = new Array();        // array of markers generated at t-parameter
+      bz var __sMarkers:Array          = new Array();        // array of markers genreated at normalized arc-legnth parameter
+
+      // ui namespace (ui thingies)
+      public namespace ui;
+      ui var __stage:Stage             = null;               // Stage reference
+      ui var __connect:Shape           = new Shape();        // lines connecting the control points
+      ui var __curve:Shape             = new Shape();        // bezier curve drawn in this Shape
+      ui var __knots:Sprite            = new Sprite();       // knots drawn here
+      ui var __tMarkers:Sprite         = new Sprite();       // t-parameter markers drawn here
+      ui var __sMarkers:Sprite         = new Sprite();       // normalized arc-length parameter markers drawn here
+      ui var __drawArea:PointSelector  = null;               // reference to point-selector
+      ui var __myReference:UIComponent = new UIComponent();  // UIComponent reference
+      
+      // animation control namespace
+      public namespace ani;
+      ani var __selected:Knot          = null;               // reference to selected knot
+      ani var __indx:uint              = 0;                  // index of selected knot
+      
+      public function test():void 
+      { 
+      	addChild(ui::__myReference);
+      	        
+      	// get the appropriate instance from the factory based on number of control points
+        bz::__bezier.addEventListener(SingularityEvent.ERROR, errHandler);
+        bz::__bezier.container = ui::__curve;
+        
+        bz::__bezierArc.addEventListener(SingularityEvent.ERROR, errHandler);
+        bz::__bezierArc.parameterize = Consts.ARC_LENGTH;
+        
+        ui::__stage = ui::__myReference.stage;
+        
+        // define drawing area - use top of normal button for bottom level
+        var drawX:uint = __status__.x;
+        var drawY:uint = __status__.y + __status__.height + 5;
+        var drawW:uint = __status__.width;
+        var drawH:uint = ui::__stage.height - __status__.y - __status__.height - 20;
+        
+        ui::__drawArea = new PointSelector(drawX, drawY, drawW, drawH, 0xcccccc);
+        ui::__drawArea.addEventListener(SingularityEvent.SELECTED, onSelected);
+        
+        ui::__myReference.addChild(ui::__drawArea);
+        ui::__myReference.addChild(ui::__curve);
+        ui::__myReference.addChild(ui::__connect);
+        ui::__myReference.addChild(ui::__tMarkers);
+        ui::__myReference.addChild(ui::__sMarkers);
+        ui::__myReference.addChild(ui::__knots);
+        
+        ui::__tMarkers.visible = false;
+        ui::__sMarkers.visible = false;
+        for( var i:uint=0; i<11; ++i )
+        {
+          var knot:Knot     = new Knot(8, 0x003399);
+          bz::__tMarkers[i] = knot;
+          ui::__tMarkers.addChild(knot);
+          
+          knot              = new Knot(8, 0xccffcc);
+          bz::__sMarkers[i] = knot;
+          ui::__sMarkers.addChild(knot);
+        }
+          
+        __status__.text = "Click in draw area to select 3 control points for quad. Bezier.";
+      }
+      
+      public function errHandler(_e:Event):void
+      {
+      	__status__.text = _e.toString();
+      }
+      
+      public function onKnotRollOver(_e:Event):void
+      {
+        __status__.text = "Knot: " + _e.target.id;
+      }
+      
+      public function onKnotRollOut(_e:SingularityEvent):void
+      {
+        __status__.text = "Select and drag a knot to adjust the curve.";
+      }
+      
+      public function onKnotPress(_e:Event):void
+      {
+      	ani::__selected = Knot(_e.target);
+      	ani::__indx = ani::__selected.id;
+      	       
+        ani::__selected.startDrag(true);
+ 
+        __status__.text = "Moving knot: " + ani::__indx;
+        ui::__stage.addEventListener(Event.ENTER_FRAME, onDrag);
+      }
+      
+      public function onDrag(_e:Event):void
+      {
+        var newX:Number = ani::__selected.x;
+        var newY:Number = ani::__selected.y;
+        
+      	bz::__bezier.moveControlPoint(ani::__indx, newX, newY);
+      	bz::__bezierArc.moveControlPoint(ani::__indx, newX, newY);
+      	
+      	// update display
+      	ui::__curve.graphics.clear();
+      	connectKnots();
+      	bz::__bezier.draw(1.0);
+              
+        // update markers
+        var t:Number  = 0;
+        var dt:Number = 0.1;
+        for( var i:uint=0; i<11; ++i )
+        {
+          var knot:Knot = bz::__tMarkers[i];
+          knot.x        = bz::__bezier.getX(t);
+          knot.y        = bz::__bezier.getY(t);
+              
+          knot   = bz::__sMarkers[i];
+          knot.x = bz::__bezierArc.getX(t);
+          knot.y = bz::__bezierArc.getY(t);
+              
+          t += dt;
+        }
+      }
+      
+      public function onKnotRelease(_e:MouseEvent):void
+      {
+      	ui::__stage.removeEventListener(Event.ENTER_FRAME, onDrag);
+      	ani::__selected.stopDrag();
+      }
+      
+      public function onSelected(_e:SingularityEvent):void
+      {
+      	var p:PointSelector = PointSelector(_e.target);
+      	
+      	var pX:uint = p.selectedX;
+      	var pY:uint = p.selectedY;
+      	                  
+        var knot:Knot = new Knot(6, 0xffcccc);
+        knot.addEventListener( SingularityEvent.ROLL_OVER, onKnotRollOver );
+        knot.addEventListener( SingularityEvent.ROLL_OUT , onKnotRollOut  );
+        knot.addEventListener( MouseEvent.MOUSE_DOWN     , onKnotPress    );
+        knot.addEventListener( MouseEvent.MOUSE_UP       , onKnotRelease  );
+        
+        bz::__bezier.addControlPoint(pX,pY);
+        bz::__bezierArc.addControlPoint(pX,pY);
+        bz::__knots.push(knot);
+        
+        knot.id = bz::__count++;
+        knot.x  = pX;
+        knot.y  = pY;
+        
+        ui::__knots.addChild(knot);
+        
+        switch( bz::__count )
+        {
+          case 1 :
+            ui::__connect.graphics.lineStyle(0,0x000000);
+            ui::__connect.graphics.moveTo(pX, pY);
+          break;
+            
+          case 2 :
+            ui::__connect.graphics.lineTo(pX, pY);
+          break;
+            
+          case 3 :
+            ui::__connect.graphics.lineTo(pX, pY);
+            p.disableXHair();
+            
+            ui::__connect.graphics.lineTo(pX, pY);
+
+            bz::__bezier.draw(1.0);
+              
+            // display both sets of markers at 0.1 delta
+            var t:Number  = 0;
+            var dt:Number = 0.1;
+            for( var i:uint=0; i<11; ++i )
+            {
+              knot   = bz::__tMarkers[i];
+              knot.x = bz::__bezier.getX(t);
+              knot.y = bz::__bezier.getY(t);
+              
+              knot   = bz::__sMarkers[i];
+              knot.x = bz::__bezierArc.getX(t);
+              knot.y = bz::__bezierArc.getY(t);
+              
+              t += dt;
+            }
+            
+            ui::__tMarkers.visible = true;
+            ui::__sMarkers.visible = true;
+            
+            __status__.text = "Select and then drag a knot to adjust the curve.";
+          break;
+        }
+      }
+      
+      public function connectKnots():void
+      {
+      	var g:Graphics = ui::__connect.graphics;
+      	g.clear();
+      	g.lineStyle(0,0x000000);
+      	var k:Knot = bz::__knots[0];
+      	g.moveTo(k.x, k.y);
+      	
+      	for( var i:uint=1; i<3; ++i )
+      	{
+          k = bz::__knots[i];
+      	  g.lineTo(k.x, k.y);
+      	}
+      }
+      
+    ]]>
+  </mx:Script>
+	
+</mx:Application>
+

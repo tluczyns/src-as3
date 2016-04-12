@@ -1,0 +1,278 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" applicationComplete="test()" width="600" height="500">
+  <mx:TextArea height="26" id="__status__" wordWrap="true" editable="false" top="10" left="23" right="22"/>
+  <mx:Button x="141" y="468" label="Move" id="__move__" enabled="false" click="onMove()"/>
+  <mx:Button x="208" y="468" label="Reset" id="__reset__" enabled="false" click="onReset()"/>
+  <mx:Button x="348" y="468" label="Arc Length" id="__arclen__" enabled="false" click="onArcLen()"/>
+  <mx:Button x="23" y="468" label="Draw" id="__draw__" enabled="true" click="onDraw()"/>
+  <mx:Button x="447" y="468" label="Uniform" id="__uniform__" enabled="false" click="onUniform()"/>
+	
+	<mx:Script>
+    <![CDATA[
+      import Singularity.Geom.CatmullRom;
+      import Singularity.Numeric.Consts;
+      import Singularity.Geom.Knot;
+     
+      import Singularity.Events.SingularityEvent;
+
+      import Singularity.Interactive.PointSelector;
+      
+      import mx.core.UIComponent;
+      
+      import flash.display.Shape;
+      import flash.display.Sprite;
+      
+      // catmull-rom spline (crs) namespace
+      public namespace crs;
+      
+      crs var NORMAL:String             = "N";
+      crs var MOVE:String               = "M";
+      
+      crs var __mode:String             = crs::NORMAL;        // current mode
+      crs var __spline:CatmullRom       = new CatmullRom();   // parametric spline reference
+      crs var __count:uint              = 0;                  // count number of control points
+      crs var __selected:uint           = 0;                  // index of selected control point
+      crs var __knots:Array             = new Array();        // collection of Knot references
+      crs var __controlPoints:Array     = new Array();        // collection of control-point coordinates
+      crs var __markers:Array           = new Array();        // collection at markers distributed along spline
+      crs var __connect:Shape           = new Shape();        // lines connecting the control points
+      crs var __curve:Shape             = new Shape();        // bezier curve drawn in this Shape
+      crs var __drawKnots:Sprite        = new Sprite();       // knots drawn here
+      crs var __plotMarkers:Sprite      = new Sprite();       // markers drawn here
+      crs var __drawArea:PointSelector  = null;               // reference to point-selector
+      crs var __myReference:UIComponent = new UIComponent();  // UIComponent reference
+      
+      public function test():void 
+      { 
+      	addChild(crs::__myReference);
+      	        
+        crs::__spline.addEventListener(SingularityEvent.ERROR, errHandler);
+        crs::__spline.container = crs::__curve;
+        
+        // define drawing area - use top of normal button for bottom level
+        var drawX:uint = __status__.x;
+        var drawY:uint = __status__.y + __status__.height + 5;
+        var drawW:uint = __status__.width;
+        var drawH:uint = __draw__.y - drawY - 10;
+        
+        crs::__drawArea = new PointSelector(drawX, drawY, drawW, drawH, 0xcccccc);
+        crs::__drawArea.addEventListener(SingularityEvent.SELECTED, onSelected);
+        
+        // generate ten markers to be distributed along the spline (illustrating difference between uniform and arc-length parametrization)
+        crs::__plotMarkers.visible = false;
+        for( var i:uint=0; i<10; ++i )
+        {
+          var knot:Knot     = new Knot(8, 0xccffcc);
+          crs::__markers[i] = knot;
+          crs::__plotMarkers.addChild(knot);
+        }
+          
+        crs::__myReference.addChild(crs::__drawArea);
+        crs::__myReference.addChild(crs::__curve);
+        crs::__myReference.addChild(crs::__connect);
+        crs::__myReference.addChild(crs::__drawKnots);
+        crs::__myReference.addChild(crs::__plotMarkers);
+        
+        __status__.text = "Click in draw area to select knots, then click 'Draw' to plot draw the Catmull-Rom spline";
+      }
+      
+      public function errHandler(_e:Event):void
+      {
+      	__status__.text = _e.toString();
+      }
+      
+      public function onKnotRollOver(_e:Event):void
+      {
+        __status__.text = "Knot: " + _e.target.id;
+      }
+      
+      public function onKnotRollOut(_e:SingularityEvent):void
+      {
+      	if( crs::__mode == crs::NORMAL )
+      	  __status__.text = "Catmull-Rom Spline drawn with selected control points.  Move control point or reset";
+      	else if ( crs::__mode == crs::MOVE )
+      	  __status__.text = "Selected control point: " + crs::__selected + ".  Click in draw area to move control point";
+      	else
+      	  __status__.text = "";
+      }
+      
+      public function onKnotSelected(_e:Event):void
+      {
+      	if( crs::__mode == crs::MOVE )
+      	{
+          __status__.text = "Selected control point: " + crs::__selected + ".  Click in draw area to move control point";
+      	  var k:Knot      = Knot(_e.target);
+      	  crs::__selected = k.id;
+
+      	  crs::__drawArea.enableXHair();
+      	
+      	  k.color(0xff0000);
+      	}
+      }
+      
+      public function onSelected(_e:SingularityEvent):void
+      {
+      	var p:PointSelector = PointSelector(_e.target);
+      	
+      	var pX:uint = p.selectedX;
+      	var pY:uint = p.selectedY;
+      	
+      	// process move mode first
+      	if( crs::__mode == crs::MOVE )
+        {
+          crs::__drawArea.disableXHair();
+              
+          // move the control point and then update the curve based on previous mode
+          crs::__spline.moveControlPoint(crs::__selected, pX, pY);
+          var k:Knot    = crs::__knots[crs::__selected];
+          var pt:Object = crs::__controlPoints[crs::__selected];
+          pt.X          = pX;
+          pt.Y          = pY;
+          k.x           = pX;
+          k.y           = pY;
+          k.resetColor();
+          
+          connectKnots();
+          
+          crs::__curve.graphics.clear();
+          crs::__spline.draw(1.0);
+          crs::__mode = crs::NORMAL;
+          
+          __arclen__.enabled  = true;
+          __uniform__.enabled = false;
+        }
+        else
+      	{                 
+          var knot:Knot = new Knot(6, 0xffcccc);
+          knot.addEventListener( SingularityEvent.ROLL_OVER, onKnotRollOver );
+          knot.addEventListener( SingularityEvent.ROLL_OUT , onKnotRollOut  );
+          knot.addEventListener( SingularityEvent.SELECTED , onKnotSelected );
+        
+          crs::__spline.addControlPoint(pX,pY);
+          crs::__knots.push(knot);
+        
+          knot.id = crs::__count++;
+          knot.x  = pX;
+          knot.y  = pY;
+        
+          crs::__drawKnots.addChild(knot);
+        
+          // add point to knot collection
+          crs::__controlPoints.push( {X:pX, Y:pY} );
+        }
+      }
+      
+      public function onDraw():void
+      {
+      	connectKnots();
+      	
+      	crs::__drawArea.disableXHair();
+            
+        crs::__spline.draw(1.0);
+            
+        __move__.enabled   = true;
+        __reset__.enabled  = true;
+        __arclen__.enabled = true;
+        __draw__.enabled   = false;
+      }
+      
+      public function connectKnots():void
+      {
+      	var g:Graphics = crs::__connect.graphics;
+      	g.clear();
+      	g.lineStyle(0,0x000000);
+      	var p:Object = crs::__controlPoints[0];
+      	g.moveTo(p.X, p.Y);
+      	
+      	for( var i:uint=1; i<crs::__count; ++i )
+      	{
+          p = crs::__controlPoints[i];
+      	  g.lineTo(p.X, p.Y);
+      	}
+      }
+      
+      public function onMove():void
+      {
+      	crs::__mode                = crs::MOVE;
+      	crs::__plotMarkers.visible = false;
+      	
+      	__status__.text = "Move - Select control point.";
+      }
+      
+      public function onArcLen():void
+      {
+      	__arclen__.enabled  = false;
+      	__uniform__.enabled = true;
+      	
+        crs::__spline.parameterize = Consts.ARC_LENGTH;
+        
+        // distribute markers at equal intervals of arc length
+        for( var i:uint=0, s:Number=0; i<10; ++i, s+=0.1 )
+        {
+          var k:Knot = crs::__markers[i];
+          k.x        = crs::__spline.getX(s);
+          k.y        = crs::__spline.getY(s);
+        }
+        
+        crs::__plotMarkers.visible = true;
+      }
+      
+      public function onUniform():void
+      {
+      	__arclen__.enabled  = true;
+      	__uniform__.enabled = false;
+      	
+        crs::__spline.parameterize = Consts.UNIFORM;
+        
+        // distribute markers at equal intervals of equal parameter value
+        for( var i:uint=0, t:Number=0; i<10; ++i, t+=0.1 )
+        {
+          var k:Knot = crs::__markers[i];
+          k.x        = crs::__spline.getX(t);
+          k.y        = crs::__spline.getY(t);
+        }
+        
+        crs::__plotMarkers.visible = true;
+      }
+      
+      public function onReset():void
+      {
+      	// restore the application to its initial state, preparing for new control points
+      	__move__.enabled    = false;
+      	__reset__.enabled   = false;
+      	__arclen__.enabled  = false;
+      	__uniform__.enabled = false;
+      	__draw__.enabled    = true;
+      
+        crs::__spline.parameterize = Consts.UNIFORM;	
+      	crs::__plotMarkers.visible = false;
+      	
+      	__status__.text = "Click in draw area to select knots, then click 'Draw' to plot draw the Catmull-Rom spline";
+      	
+        crs::__curve.graphics.clear();
+        crs::__connect.graphics.clear();
+        crs::__spline.reset();
+        
+        for( var i:uint=0; i<crs::__count; ++i )
+        {
+          crs::__knots[i].destruct();
+          delete crs::__knots[i];
+          
+          delete crs::__controlPoints[i];
+        }
+        
+        crs::__controlPoints.splice(0);
+        crs::__knots.splice(0);
+        
+        crs::__mode     = crs::NORMAL;
+        crs::__count    = 0;
+        crs::__selected = 0;
+        
+        crs::__drawArea.enableXHair();
+      }
+    ]]>
+  </mx:Script>
+	
+</mx:Application>
+
+

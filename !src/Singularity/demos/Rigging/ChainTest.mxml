@@ -1,0 +1,268 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" applicationComplete="test()" width="600" height="500">
+  <mx:TextArea height="32" id="__status__" wordWrap="true" editable="false" top="10" left="23" right="22"/>
+  <mx:Button x="162" y="464" label="Move" id="__move__" enabled="false" click="onMove()"/>
+  <mx:HSlider x="333" y="472" id="__angle__" allowTrackClick="false" minimum="0" maximum="360" enabled="false" thumbRelease="onSliderRelease()" change="onAngleChange(event)" liveDragging="true"/>
+  <mx:Label x="333" y="456" text="Rotation: " color="#ffffff" id="__label__" enabled="false" width="245"/>
+  <mx:Button x="226" y="464" label="Rotate" id="__rotate__" enabled="false" click="onRotate()"/>
+  <mx:Button x="23" y="464" label="Link" id="__link__" enabled="false" click="onLink()"/>
+	
+	<mx:Script>
+    <![CDATA[
+      import Singularity.Numeric.Consts;
+      
+      import Singularity.Rigs.BaseBone;
+      import Singularity.Rigs.Bone;
+      import Singularity.Rigs.Chain;
+      import Singularity.Rigs.Template;
+      
+      import flash.display.Sprite;
+      import flash.events.MouseEvent;
+      import flash.events.KeyboardEvent;
+      import flash.ui.Keyboard;
+      
+      import mx.controls.sliderClasses.Slider;
+      import mx.core.UIComponent;
+      import mx.events.SliderEvent;
+ 
+      // bone (bn) namespace
+      public namespace bn;
+      
+      bn var __move:Boolean            = false;              // true if processing a move
+      bn var __count:uint              = 0;                  // point counter
+      bn var __bone:Bone               = null;               // reference to a single bone
+      bn var __chain:Chain             = new Chain();        // primary bone chain
+      bn var __hand:Chain              = new Chain();        // single-link chain representing a hand bone
+      bn var __isTerminated:Boolean    = false;              // true when chain is terminated
+
+      bn var __myReference:UIComponent = new UIComponent();  // UIComponent reference
+      
+      // user-interface (ui) namespace
+      public namespace ui;
+      ui var __stage:Stage  = null;
+      ui var __track:Sprite = new Sprite();
+      
+      public function test():void 
+      { 
+      	addChild(bn::__myReference);
+        bn::__myReference.addChild(bn::__chain);
+        bn::__myReference.addChild(bn::__hand);
+        bn::__myReference.addChild(ui::__track);
+        
+        ui::__stage = ui::__track.stage;
+        
+        // define drawing area 
+        var drawY:uint = __status__.y + __status__.height + 5;
+        var drawH:uint = __link__.y - drawY - 10;
+        
+        var g:Graphics = ui::__track.graphics;
+        g.lineStyle(1,0xffffff,.2);
+        g.beginFill(0xffffff,.2);
+        g.drawRect(0,drawY,ui::__stage.width,drawH);
+        
+        // notification of low-level bone interactivity
+        bn::__chain.setNotify(onBone);
+
+        ui::__track.addEventListener(MouseEvent.CLICK, onSelected);
+        ui::__stage.addEventListener(KeyboardEvent.KEY_DOWN, terminate);
+        
+        // add the hand bone to the hand chain 
+        
+        // Hand Template
+        var t:Template = new Template();
+        t.insert(0,20);
+        t.insert(25,50);
+        t.insert(85,60);
+        t.insert(100,35);
+        
+        bn::__hand.addBoneAt(30, 70, 30, 50, "hand", 0, Bone.CUSTOM, t, true);
+        bn::__hand.setNotify(onBone);
+        bn::__hand.enabled = true;
+        
+        __status__.text = "Click anywhere to start drawing a bone.  New clicks create new bones.  Click SPACE BAR to end the chain";
+      }
+      
+      public function errHandler(_e:Event):void
+      {
+      	__status__.text = _e.toString();
+      }
+      
+      // low-level bone interactivity - NOTE:  This example is not meant to toggle selections back and forth between chains.  Toggling is within a chain.
+      // You could add toggling across chains by checking the Chain reference passed to addBone() against the most recently selected chain.
+      public function onBone(_c:Chain):void
+      {
+        switch( _c.mouseEvent )
+        {
+          case BaseBone.BONE_ROLL_OVER :
+            var b:Bone = _c.current;
+            if( b.IS_ROOT )
+              __status__.text = "Root Bone";
+            else if( b.IS_END )
+              __status__.text = "Terminal Bone";
+            else
+              __status__.text = b.NAME;
+          break;
+          
+          case BaseBone.BONE_ROLL_OUT :
+            __status__.text = "";
+          break;
+   
+          case BaseBone.BONE_SELECTED :
+            __status__.text    = "Selected Bone: " + _c.current.NAME;
+            bn::__bone         = _c.current;
+            
+            // only allow moves of root bone in chain
+            __move__.enabled   = bn::__bone.IS_ROOT;
+            __rotate__.enabled = true;
+          break;
+        }
+      }
+      
+      public function trackMouse(_e:MouseEvent):void
+      {     	
+        bn::__bone.setTerminal(_e.localX,_e.localY);  
+      	bn::__bone.draw();	
+      }
+      
+      public function onSelected(_e:MouseEvent):void
+      {
+      	var pX:uint = _e.localX;
+      	var pY:uint = _e.localY;
+     	
+     	// process mouse clicks
+     	if( bn::__move )
+     	{
+          // move the root bone in the chain as a result of clicking somewhere on stage (after selecting 'Move')
+      	  __status__.text = "Move to: " + pX + " " + pY;
+      	
+      	  bn::__chain.move(pX,pY);
+      	  bn::__chain.enabled = true;
+      	
+      	  __move__.enabled   = true;
+      	  __rotate__.enabled = true;
+      	  bn::__move         = false;
+     	}
+     	else
+     	{
+     	  // do not start new chains if one has already been terminated
+     	  if( !bn::__isTerminated )
+     	  {
+      	    if( bn::__count == 0 )
+      	    {
+      	      bn::__bone      = bn::__chain.createBone();      // newly created bone is now in display list
+      	      bn::__bone.NAME = "Bone"+bn::__count.toString();
+      	      bn::__bone.ID   = bn::__count;
+      	  
+      	      // completely turn off all internal mouse events until chain is completed
+      	      bn::__bone.disableMouseEvents();
+      	      
+      	      // initial joint coordinates
+      	      bn::__bone.setInitial(pX, pY);
+      	      bn::__isTerminated = false;
+      	      
+              ui::__track.addEventListener(MouseEvent.MOUSE_MOVE, trackMouse);
+            }
+            else
+            {
+              ui::__track.removeEventListener(MouseEvent.MOUSE_MOVE, trackMouse);
+              
+              // terminate current bone
+      	      bn::__bone.setTerminal(pX, pY);
+      	      bn::__bone.draw();
+
+      	      // begin new bone
+      	      bn::__bone         = bn::__chain.createBone();      // newly created bone is now in display list
+      	      bn::__bone.NAME    = "Bone"+bn::__count.toString();
+      	      bn::__bone.ID      = bn::__count;
+      	   
+      	      bn::__bone.disableMouseEvents();
+      	      bn::__bone.setInitial(pX, pY);
+      	      
+              ui::__track.addEventListener(MouseEvent.MOUSE_MOVE, trackMouse);
+      	    }
+            bn::__count++;
+          }
+        }
+      }
+      
+      // terminate the chain
+      public function terminate(_e:KeyboardEvent):void
+      {
+      	if( _e.charCode == flash.ui.Keyboard.SPACE && !bn::__isTerminated )
+      	{
+          bn::__isTerminated = true;
+      	  ui::__track.removeEventListener(MouseEvent.MOUSE_MOVE, trackMouse);
+      	  ui::__track.removeEventListener(MouseEvent.CLICK, onSelected);
+      	  ui::__track.visible = false;
+      	  
+      	  // currently drawn bone is invalid
+          bn::__chain.pop();
+      	  
+      	  // enable all bones
+      	  bn::__chain.enabled = true;
+      	  
+      	  // no bone currently selected
+      	  bn::__bone = null;
+      	  
+      	  // move is not allowed by default -- only if root bone is selected
+      	  __rotate__.enabled = true;
+      	  __link__.enabled   = true;
+        }
+      }
+     
+      public function onMove():void
+      {
+      	__move__.enabled    = false;
+      	__rotate__.enabled  = true;
+      	bn::__chain.enabled = false;
+      	bn::__chain.selectRoot();
+      	
+      	__status__.text = "Click anywhere to move root bone";
+      	ui::__stage.addEventListener(MouseEvent.CLICK, onSelected, true);
+      	bn::__move          = true;
+      }
+      
+      // rotate a bone
+      public function onRotate():void
+      {
+        if( bn::__bone != null )
+        {
+          bn::__move         = false;
+          __rotate__.enabled = false;
+          __move__.enabled   = false;
+          __label__.enabled  = true;
+          __angle__.enabled  = true;
+          
+          var angle:Number   = bn::__bone.orientation*Consts.RAD_TO_DEG;
+          __label__.text     = "Initial Rotation Angle: " + Math.round(angle).toString();
+          
+          __angle__.value = angle;
+        }
+        else
+          __status__.text = "Select a bone to rotate";
+      }
+      
+      // process orientation changes from the slider
+      public function onAngleChange(_e:SliderEvent):void
+      {
+        var angle:Number       = __angle__.value*Consts.DEG_TO_RAD;
+        bn::__bone.orientation = angle;
+      }
+      
+      public function onSliderRelease():void
+      {
+        // mark previously selected bone as unselected
+        bn::__bone.deselect();
+      }
+      
+      // link the 'hand' chain to whatever chain is interactively created
+      public function onLink():void
+      {
+      	// true to match orientation, false to leave initial hand orientation unchanged on link
+      	bn::__chain.link(bn::__hand, true);
+      }
+    ]]>
+  </mx:Script>
+
+	
+</mx:Application>

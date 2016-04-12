@@ -1,0 +1,230 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" applicationComplete="test()" width="600" height="500">
+  <mx:TextArea height="26" id="__status__" wordWrap="true" editable="false" top="10" left="23" right="22"/>
+  <mx:Button x="23" y="472" label="Draw" id="__draw__" enabled="true" click="onDraw()"/>
+  <mx:Button x="89" y="472" label="Control Cages" id="__cages__" click="drawControlCages()" enabled="false"/>
+  <mx:Button x="386" y="472" label="Arc Length" id="__arcLength__" click="onArcLength()" enabled="false"/>
+  <mx:Button x="485" y="472" label="Uniform" id="__uniform__" click="onUniform()" enabled="false"/>
+  <mx:Label x="59" y="453" text="Drawing" width="56" color="#ffffff"/>
+  <mx:Label x="425" y="453" text="Parameterization" width="100" color="#ffffff"/>
+	
+	<mx:Script>
+    <![CDATA[
+    
+      // Simple test driver for closed Bezier Spline.  Enter a number of knots, but do not attempt to connect the first and last
+      // knot.  Spline closure is automatic.
+      
+      import Singularity.Events.SingularityEvent;
+            
+      import Singularity.Geom.BezierSpline;
+      import Singularity.Geom.Knot;
+     
+      import Singularity.Numeric.Consts;
+
+      import Singularity.Interactive.PointSelector;
+      
+      import mx.core.UIComponent;
+      
+      import flash.display.Shape;
+      import flash.display.Sprite;
+      
+      // bezier spline (bzs) namespace
+      public namespace bzs;
+      bzs var __spline:BezierSpline     = new BezierSpline(); // cubic bezier spline reference
+      bzs var __count:uint              = 0;                  // count number of control points
+      bzs var __knots:Array             = new Array();        // collection of spline Knot references
+      bzs var __markers:Array           = new Array();        // collection at markers distributed along spline
+      
+      // ui namespace
+      public namespace ui;
+      ui var __connect:Shape           = new Shape();        // lines connecting the control points
+      ui var __curve:Shape             = new Shape();        // bezier curve drawn
+      ui var __controlCage:Shape       = new Shape();        // draw control cages
+      ui var __knots:Sprite            = new Sprite();       // draw original knots
+      ui var __markers:Sprite          = new Sprite();       // markers drawn here
+      ui var __drawArea:PointSelector  = null;               // reference to point-selector
+      ui var __myReference:UIComponent = new UIComponent();  // UIComponent reference
+      
+      public function test():void 
+      { 
+      	addChild(ui::__myReference);
+      	        
+        bzs::__spline.addEventListener(SingularityEvent.ERROR, errHandler);
+        bzs::__spline.container = ui::__curve;
+        bzs::__spline.closed    = true;        // indicate a closed spline
+        
+        // define drawing area - use top of normal button for bottom level
+        var drawX:uint = __status__.x;
+        var drawY:uint = __status__.y + __status__.height + 5;
+        var drawW:uint = __status__.width;
+        var drawH:uint = __draw__.y - drawY - 20;
+        
+        // generate ten markers to be distributed along the spline (illustrating difference between uniform and arc-length parametrization)
+        ui::__markers.visible = false;
+        for( var i:uint=0; i<10; ++i )
+        {
+          var knot:Knot     = new Knot(8, 0xccffcc);
+          bzs::__markers[i] = knot;
+          ui::__markers.addChild(knot);
+        }
+        
+        ui::__drawArea = new PointSelector(drawX, drawY, drawW, drawH, 0xcccccc);
+        ui::__drawArea.addEventListener(SingularityEvent.SELECTED, onSelected);
+          
+        ui::__myReference.addChild(ui::__drawArea);
+        ui::__myReference.addChild(ui::__curve);
+        ui::__myReference.addChild(ui::__connect);
+        ui::__myReference.addChild(ui::__controlCage);
+        ui::__myReference.addChild(ui::__knots);
+        ui::__myReference.addChild(ui::__markers);
+        
+        __status__.text = "Click in draw area to select knots, then click 'Draw' to close and draw the cubic bezier spline";
+      }
+      
+      public function errHandler(_e:Event):void
+      {
+      	__status__.text = _e.toString();
+      }
+      
+      public function onKnotRollOver(_e:Event):void
+      {
+        __status__.text = "Knot: " + _e.target.id;
+      }
+      
+      public function onKnotRollOut(_e:SingularityEvent):void
+      {
+      	__status__.text = "Knot: " + _e.target.id;
+      }
+      
+      public function onKnotSelected(_e:Event):void
+      {
+      	// no action currently taken
+      }
+      
+      public function onSelected(_e:SingularityEvent):void
+      {
+      	var p:PointSelector = PointSelector(_e.target);
+      	
+      	var pX:uint = p.selectedX;
+      	var pY:uint = p.selectedY;
+      	          
+        var knot:Knot = new Knot(6, 0xffcccc);
+        knot.addEventListener( SingularityEvent.ROLL_OVER, onKnotRollOver );
+        knot.addEventListener( SingularityEvent.ROLL_OUT , onKnotRollOut  );
+        knot.addEventListener( SingularityEvent.SELECTED , onKnotSelected );
+        
+        bzs::__spline.addControlPoint(pX,pY);
+        bzs::__knots.push(knot);
+        
+        knot.id = bzs::__count++;
+        knot.x  = pX;
+        knot.y  = pY;
+        
+        ui::__knots.addChild(knot);
+      }
+     
+      public function onDraw():void
+      {
+      	// duplicate first knot to close out the knot set
+      	var knot:Knot = new Knot(6, 0xffcccc);
+        knot.addEventListener( SingularityEvent.ROLL_OVER, onKnotRollOver );
+        knot.addEventListener( SingularityEvent.ROLL_OUT , onKnotRollOut  );
+        knot.addEventListener( SingularityEvent.SELECTED , onKnotSelected );
+        
+        bzs::__knots.push(knot);
+        
+        knot.id = bzs::__count++;
+        knot.x  = bzs::__knots[0].x;
+        knot.y  = bzs::__knots[0].y;
+        
+      	connectKnots();
+      	
+      	ui::__drawArea.disableXHair();
+            
+        // Instead of using the fast (but less accurate draw method), sample the spline.  Sprite are distributed along the curve
+        // to illustrate arc-length parameterization.
+        var len:Number    = bzs::__spline.arcLength();
+        var deltaT:Number = 2.0/len;
+        var g:Graphics    = ui::__curve.graphics;
+        g.clear();
+        g.lineStyle(1,0x0000ff);
+      
+        g.moveTo(bzs::__spline.getX(0), bzs::__spline.getY(0));
+        for( var t:Number=deltaT; t<=1; t+=deltaT )
+          g.lineTo(bzs::__spline.getX(t), bzs::__spline.getY(t)); 
+        
+        // illustrate the uniform parameterization
+        onUniform();
+        
+        __status__.text       = "Markers indicate uniform parameterization";    
+        __arcLength__.enabled = true;
+        __cages__.enabled     = true;
+        __draw__.enabled      = false;
+      }
+      
+      public function connectKnots():void
+      {
+      	var g:Graphics = ui::__connect.graphics;
+      	g.clear();
+      	g.lineStyle(0,0x000000);
+      	var k:Knot = bzs::__knots[0];
+      	g.moveTo(k.x, k.y);
+      	
+      	for( var i:uint=1; i<bzs::__count; ++i )
+      	{
+          k = bzs::__knots[i];
+      	  g.lineTo(k.x, k.y);
+      	}
+      }
+      
+      public function drawControlCages():void
+      {
+      	var g:Graphics = ui::__controlCage.graphics;
+        g.clear();
+        
+        bzs::__spline.drawControlPoints(ui::__controlCage, 0xff0000);
+      }
+      
+      public function onArcLength():void
+      {
+      	__arcLength__.enabled = false;
+      	__uniform__.enabled   = true;
+      	
+        bzs::__spline.parameterize = Consts.ARC_LENGTH;
+        
+        // distribute markers at equal intervals of arc length
+        for( var i:uint=0, s:Number=0; i<10; ++i, s+=0.1 )
+        {
+          var k:Knot = bzs::__markers[i];
+          k.x        = bzs::__spline.getX(s);
+          k.y        = bzs::__spline.getY(s);
+        }
+        
+        ui::__markers.visible = true;
+      }
+      
+      public function onUniform():void
+      {
+      	__arcLength__.enabled = true;
+      	__uniform__.enabled   = false;
+      	
+        bzs::__spline.parameterize = Consts.UNIFORM;
+        
+        // distribute markers at equal intervals of equal parameter value
+        for( var i:uint=0, t:Number=0; i<10; ++i, t+=0.1 )
+        {
+          var k:Knot = bzs::__markers[i];
+          k.x        = bzs::__spline.getX(t);
+          k.y        = bzs::__spline.getY(t);
+        }
+        
+        ui::__markers.visible = true;
+      }
+    ]]>
+  </mx:Script>
+	
+</mx:Application>
+
+
+
+

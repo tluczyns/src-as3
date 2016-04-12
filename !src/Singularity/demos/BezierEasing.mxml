@@ -1,0 +1,211 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" width="550" height="500" applicationComplete="test();">
+  <mx:TextArea height="26" id="__status__" wordWrap="true" editable="false" top="10" left="23" right="22"/>
+  <mx:Button x="242" y="472" label="Animate" id="__animate__" enabled="false" click="__onAnimate()"/>
+  <mx:ComboBox x="379" y="44" id="__easeSelector__" enabled="true" change="__onEaseChanged()" width="150"/>
+	<mx:Label x="211" y="46" text="Select Ease Type (ease out)" id="__select__" fontWeight="bold"/>
+	
+	<mx:Script>
+    <![CDATA[
+      import Singularity.Easing.Easing;
+      import Singularity.Easing.EaseFactory;
+      import Singularity.Geom.Parametric;
+      import Singularity.Geom.Bezier;
+    
+      // This program illustrates easing along a parametric curve using a cubic Bezier with both uniform- and arc-length parameterization
+      
+      import Singularity.Events.SingularityEvent;
+            
+      import Singularity.Geom.Parametric;
+      import Singularity.Geom.Bezier3;
+      import Singularity.Geom.Knot;
+     
+      import Singularity.Numeric.Consts;
+
+      // easing factory
+      import Singularity.Easing.Easing;
+      import Singularity.Easing.EaseFactory;
+      
+      // animation timing
+      import flash.utils.Timer;
+      import flash.events.TimerEvent;
+      
+      import mx.core.UIComponent;
+      
+      import flash.display.Shape;
+      import flash.display.Sprite;
+      
+      private var __factory:EaseFactory = new EaseFactory();      // reference to easing factory
+      
+      private var __uniform:Bezier3   = new Bezier3();            // cubic bezier curve (uniform parameterization)
+      private var __arcLength:Bezier3 = new Bezier3();            // cubic bezier curve (arc-length parameterization)
+      private var __vertices1:Array   = new Array();              // control vertices
+      private var __vertices2:Array   = new Array();              // control vertices
+            
+      private var __connect:Shape           = new Shape();        // lines connecting the control points
+      private var __curve1:Shape            = new Shape();        // bezier curve drawn in this shape
+      private var __curve2:Shape            = new Shape();        // bezier curve drawn in this shape
+      private var __knots:Sprite            = new Sprite();       // draw original knots
+      private var __uniformMarker:Knot      = null;               // marker animated along uniform-parameterized Bezier
+      private var __arcLengthMarker:Knot    = null;               // marker animated along arc-length paramterized Bezier
+    
+      private var __timer:Timer      = new Timer(50,0);           // interval timer
+      private var __startTime:Number = 0;                         // starting time
+      private var __elapsed:Number   = 0;                         // elapsed time
+      private var __t:Number         = 0;                         // t-parameter for uniform-parameterized curve
+      private var __s:Number         = 0;                         // arc-length (s) parameter for arc-length parameterized curve
+      private var __duration:Number  = 2;                         // duration of the animation (two seconds)
+      
+      private var __easeTypes:Array = [Easing.NONE, Easing.EXPONENTIAL, Easing.QUADRATIC, Easing.CUBIC];
+      
+      private var __myReference:UIComponent = new UIComponent();  // UIComponent reference
+      
+      private function test():void 
+      {
+      	addChild(__myReference);
+      	
+      	// normal, uniform parameterization
+        __uniform.addEventListener(SingularityEvent.ERROR, __errHandler);
+        __uniform.container = __curve1;
+        
+        // arc-length parameterization
+        __arcLength.addEventListener(SingularityEvent.ERROR, __errHandler);
+        __arcLength.container    = __curve2;
+        __arcLength.parameterize = Consts.ARC_LENGTH;
+        
+        __uniformMarker   = new Knot(8, 0xff0000);
+        __arcLengthMarker = new Knot(8, 0x00ff00);
+       
+        __myReference.addChild(__curve1);
+        __myReference.addChild(__curve2);
+        __myReference.addChild(__connect);
+        __myReference.addChild(__knots);
+        __myReference.addChild(__uniformMarker);
+        __myReference.addChild(__arcLengthMarker);
+        
+        // curve is fixed
+        __vertices1[0] = new Point(47, 83);
+        __vertices1[1] = new Point(104, 327);
+        __vertices1[2] = new Point(199, 87);
+        __vertices1[3] = new Point(514, 381);
+        
+        __vertices2[0] = new Point(47, 153);
+        __vertices2[1] = new Point(104, 397);
+        __vertices2[2] = new Point(199, 157);
+        __vertices2[3] = new Point(514, 451);
+        
+        __createBezier(__vertices1, __uniform);
+        __createBezier(__vertices2, __arcLength);
+        
+        var p:Point       = __vertices1[0];
+        __uniformMarker.x = p.x;
+        __uniformMarker.y = p.y;
+        
+        p                   = __vertices2[0];
+        __arcLengthMarker.x = p.x;
+        __arcLengthMarker.y = p.y;
+      
+        __timer.addEventListener(TimerEvent.TIMER, __onInterval);
+        
+        // note that some ease types are less suitable for path animation
+        //
+        // exercise:  Load optional parameters for relevant easing methods based on symbolic name and try one of the more 'exotic' easing methdos :)
+        __easeSelector__.dataProvider = __easeTypes;
+        
+        __status__.text = "Select easing method, then click 'Animate'";
+        
+        __animate__.enabled = true;
+      }
+      
+      private function __errHandler(_e:Event):void
+      {
+      	__status__.text = _e.toString();
+      }
+      
+      private function __createBezier(_v:Array, _b:Parametric):void
+      {
+        // hardcoded for cubic curve
+        for( var i:uint=0; i<4; ++i )
+        {
+          var knot:Knot = new Knot(6, 0xffcccc);
+          var p:Point   = _v[i];
+          var pX:Number = p.x;
+          var pY:Number = p.y;
+          
+          _b.addControlPoint(pX,pY);        
+          knot.id = i;
+          knot.x  = pX;
+          knot.y  = pY;
+        
+          __knots.addChild(knot);
+        
+          var g:Graphics = __connect.graphics;
+          if( i == 0 )
+          {
+            g.moveTo(pX,pY);
+          }
+          else
+          {
+            g.lineStyle(0,0x000000,0.2);
+            g.lineTo(pX,pY);
+          }
+        }
+        
+        _b.draw(1);
+      }
+      
+      // click the 'Animate' Button
+      private function __onAnimate():void
+      {
+        var d:Date  = new Date();
+        __startTime = d.getTime();
+      
+        __t = __s = 0;
+        __timer.start();
+      }
+      
+      // select new easing method
+      private function __onEaseChanged():void
+      {
+        var easing:String = __easeSelector__.selectedItem as String;
+        
+        __factory.easeType = easing;
+        __status__.text    = "Path Animation Easing Demo, current easing method is: " + easing;
+      }
+      
+      // handle interval timing updates
+      private function __onInterval(pEvent:TimerEvent):void
+      {
+        var d:Date = new Date();
+        __elapsed  = 0.001*(d.getTime()-__startTime);  // exercise - what is another way to get elapsed time?
+        
+        if( __elapsed >= __duration )
+        {
+          __timer.stop();
+          
+          // cleanup - make sure the exact ending point is reached
+          __uniformMarker.x = __uniform.getX(1);
+          __uniformMarker.y = __uniform.getY(1);
+
+          __arcLengthMarker.x = __arcLength.getX(1);
+          __arcLengthMarker.y = __arcLength.getY(1);
+        }
+        else
+        {
+          // ease factor plays the role of parameter value (t or arc-length)
+          // in this implementation, NONE and LINEAR are equivalent
+          var factor:Number = __factory.easeOut(__elapsed, 0, 1, __duration);
+          
+          __uniformMarker.x = __uniform.getX(factor);  // increment along uniform-parameterize curve
+          __uniformMarker.y = __uniform.getY(factor);
+
+          __arcLengthMarker.x = __arcLength.getX(factor);  // increment along arc-length parameterized curve
+          __arcLengthMarker.y = __arcLength.getY(factor);
+        }
+     }
+      
+    ]]>
+  </mx:Script>
+	
+</mx:Application>
+

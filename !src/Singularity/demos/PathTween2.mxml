@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" applicationComplete="test()" width="600" height="500">
+  <mx:TextArea height="26" id="__status__" wordWrap="true" editable="false" top="10" left="23" right="22"/>
+  <mx:Button x="23" y="468" label="Reset" id="__reset__" enabled="false" click="onReset()"/>
+  <mx:Button x="104" y="468" label="Animate" id="__animate__" enabled="true" click="onAnimate()"/>
+	
+	<mx:Script>
+    <![CDATA[
+      import Singularity.Geom.CatmullRom;
+      import Singularity.Numeric.Consts;
+      import Singularity.Geom.Knot;
+     
+      import Singularity.Events.SingularityEvent;
+
+      import Singularity.Interactive.PointSelector;
+      
+      import mx.core.BitmapAsset;
+      import mx.core.UIComponent;
+      
+      import flash.display.Shape;
+      import flash.display.Sprite;
+      
+      // image embedding
+      [Embed(source="sr71.png")]
+      [Bindable]
+      public var imgCls:Class;
+      
+      // catmull-rom spline (crs) namespace
+      public namespace crs;
+      
+      crs var __isDrawn:Boolean         = false;              // true is spline has been drawn
+      crs var __spline:CatmullRom       = new CatmullRom();   // parametric spline reference
+      crs var __count:uint              = 0;                  // count number of control points
+      crs var __knots:Array             = new Array();        // collection of Knot references
+      crs var __controlPoints:Array     = new Array();        // collection of control-point coordinates
+      crs var __curve:Shape             = new Shape();        // bezier curve drawn in this Shape
+      crs var __drawArea:PointSelector  = null;               // reference to point-selector
+      crs var __myReference:UIComponent = new UIComponent();  // UIComponent reference
+      
+      // animation namespace
+      public namespace an;
+      
+      an var __prevX:Number     = 0;      // previous-frame x-coord
+      an var __prevY:Number     = 0;      // previous-frame y-coord 
+      an var __arc:Number       = 0;      // current arc-length
+      an var __arcDelta:Number  = 0.01;   // arc-length delta - this value and the frame rate determine number of seconds of animation
+      an var __centerX:Number   = 0;      // x-coord., center point of image
+      an var __centerY:Number   = 0;      // y-coord., center point of image
+      an var __sr71:BitmapAsset = null;   // reference to SR-71 image baked into .SWF
+      
+      public function test():void 
+      { 
+      	addChild(crs::__myReference);
+      	        
+        crs::__spline.addEventListener(SingularityEvent.ERROR, errHandler);
+        crs::__spline.container = crs::__curve;
+        
+        // make sure spline is arc-length parametrized to ensure constant velocity during animmation
+        crs::__spline.parameterize = Consts.ARC_LENGTH;
+        
+        // define drawing area - use top of normal button for bottom level
+        var drawX:uint = __status__.x;
+        var drawY:uint = __status__.y + __status__.height + 5;
+        var drawW:uint = __status__.width;
+        var drawH:uint = __reset__.y - drawY - 10;
+        
+        crs::__drawArea = new PointSelector(drawX, drawY, drawW, drawH, 0xcccccc);
+        crs::__drawArea.addEventListener(SingularityEvent.SELECTED, onSelected);
+          
+        an::__sr71           = BitmapAsset(new imgCls());
+        an::__sr71.smoothing = true;
+            
+        crs::__myReference.addChild(crs::__drawArea);
+        crs::__myReference.addChild(crs::__curve);
+        crs::__myReference.addChild(an::__sr71);
+        
+        an::__centerX = 0.5*an::__sr71.width;
+        an::__centerY = 0.5*an::__sr71.height;
+        an::__sr71.x = __animate__.x + __animate__.width + 10;
+        an::__sr71.y = __animate__.y;
+        
+        __status__.text = "Click in draw area to select knots, then click 'Animate' to animate the sprite along the spline path.";
+      }
+      
+      public function errHandler(_e:Event):void
+      {
+      	__status__.text = _e.toString();
+      }
+      
+      public function onKnotRollOver(_e:Event):void
+      {
+        // no action taken in this demo
+      }
+      
+      public function onKnotRollOut(_e:SingularityEvent):void
+      {
+      	// no action taken in this demo
+      }
+      
+      public function onKnotSelected(_e:Event):void
+      {
+      	// no action taken in this demo
+      }
+      
+      public function onSelected(_e:SingularityEvent):void
+      {
+      	// add knots as long as the curve is not yet drawn
+      	if( !crs::__isDrawn )
+      	{
+      	  var p:PointSelector = PointSelector(_e.target);
+      	
+      	  var pX:uint = p.selectedX;
+      	  var pY:uint = p.selectedY;
+      	             
+          var knot:Knot = new Knot(6, 0xffcccc);
+          knot.addEventListener( SingularityEvent.ROLL_OVER, onKnotRollOver );
+          knot.addEventListener( SingularityEvent.ROLL_OUT , onKnotRollOut  );
+          knot.addEventListener( SingularityEvent.SELECTED , onKnotSelected );
+        
+          crs::__spline.addControlPoint(pX,pY);
+          crs::__knots.push(knot);
+        
+          knot.id = crs::__count++;
+          knot.x  = pX;
+          knot.y  = pY;
+        
+          crs::__myReference.addChild(knot);
+        
+          // add point to knot collection
+          crs::__controlPoints.push( {X:pX, Y:pY} );
+        }
+      }
+      
+      public function onAnimate():void
+      {
+      	if( crs::__count < 2 )
+      	  __status__.text = "Enter at least two points.";
+      	else
+      	{
+      	  crs::__drawArea.disableXHair();
+            
+          if( !crs::__isDrawn )
+          {
+            crs::__isDrawn = true;
+            crs::__spline.draw(1.0);
+          }
+            
+          __reset__.enabled   = false;
+          __animate__.enabled = false;
+        
+          // initial sprite position and orientation
+          an::__prevX = crs::__spline.getX(0);
+          an::__prevY = crs::__spline.getY(0); 
+
+          an::__arc = 0;
+
+          var deltaX:Number  = crs::__spline.getX(an::__arcDelta) - an::__prevX;
+          var deltaY:Number  = crs::__spline.getY(an::__arcDelta) - an::__prevY;
+          var myAngle:Number = Math.atan2(deltaY, deltaX);
+          an::__sr71.rotation  = myAngle*Consts.RAD_TO_DEG;
+          
+          var c:Number    = Math.cos(myAngle);
+          var s:Number    = Math.sin(myAngle);
+          var rotX:Number = an::__centerX*c - an::__centerY*s;
+          var rotY:Number = an::__centerX*s + an::__centerY*c;
+          var newX:Number = an::__prevX - rotX;
+          var newY:Number = an::__prevY - rotY;
+          
+          an::__sr71.x = newX;
+          an::__sr71.y = newY;
+          
+          an::__sr71.addEventListener(Event.ENTER_FRAME, animateSprite);
+        }
+      }
+      
+      public function animateSprite(_e:Event):void
+      {
+        an::__arc += an::__arcDelta
+        if( an::__arc > 1 )
+        {
+          // note - sprite will probably not move to last knot because of accumulated roundoff in arc length variable
+          an::__sr71.removeEventListener(Event.ENTER_FRAME, animateSprite);
+          __reset__.enabled   = true;
+          __animate__.enabled = true;
+        }
+        else
+        {
+          var planeX:Number = crs::__spline.getX(an::__arc);
+          var planeY:Number = crs::__spline.getY(an::__arc);
+          var deltaX:Number = planeX - an::__prevX;
+          var deltaY:Number = planeY - an::__prevY;
+          an::__prevX       = planeX;
+          an::__prevY       = planeY;
+  
+          var myAngle:Number = Math.atan2(deltaY, deltaX);
+          an::__sr71.rotation  = myAngle*Consts.RAD_TO_DEG;
+          
+          var c:Number    = Math.cos(myAngle);
+          var s:Number    = Math.sin(myAngle);
+          var rotX:Number = an::__centerX*c - an::__centerY*s;
+          var rotY:Number = an::__centerX*s + an::__centerY*c;
+          var newX:Number = an::__prevX - rotX;
+          var newY:Number = an::__prevY - rotY;
+          
+          an::__sr71.x = newX;
+          an::__sr71.y = newY;
+        }
+      }
+      
+      public function onReset():void
+      {
+      	// restore the application to its initial state, preparing for new control points
+      	__reset__.enabled   = false;
+      	__animate__.enabled = true;
+      	
+      	an::__sr71.x        = __animate__.x + __animate__.width + 10;
+        an::__sr71.y        = __animate__.y;
+      	an::__sr71.rotation = 0;
+      	
+      	__status__.text = "Click in draw area to select knots, then click 'Animate' to animate the sprite along the spline path.";
+      	
+        crs::__curve.graphics.clear();
+        crs::__spline.reset();
+        
+        for( var i:uint=0; i<crs::__count; ++i )
+        {
+          crs::__knots[i].destruct();
+          delete crs::__knots[i];
+          
+          delete crs::__controlPoints[i];
+        }
+        
+        crs::__controlPoints.splice(0);
+        crs::__knots.splice(0);
+        
+        crs::__count   = 0;
+        crs::__isDrawn = false;
+        
+        crs::__drawArea.enableXHair();
+      }
+    ]]>
+  </mx:Script>
+</mx:Application>
+
+
+

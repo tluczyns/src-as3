@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" applicationComplete="test()" width="600" height="500">
+  <mx:TextArea height="26" id="__status__" wordWrap="true" editable="false" top="10" left="23" right="22"/>
+  <mx:Button x="8" y="468" label="Draw Curve" id="__draw__" enabled="false" click="__onDraw()"/>
+  <mx:Button x="110" y="468" label="Reset" id="__reset__" enabled="false" click="__onReset()"/>
+  <mx:Button x="321" y="468" label="Gen. Coefficients" id="__coef__" enabled="false" click="__onCoef()"/>
+  <mx:Button x="456" y="468" label="DeCasteljau" id="__dc__" enabled="false" click="__onDecasteljau()"/>
+	
+	<mx:Script>
+    <![CDATA[
+      // Illustration of k-th order Bezier curve with simple algorithm for coefficient generation.
+      // Future version will illustrate a general application of deCasteljau's method.
+      
+      import Singularity.Geom.Bezier;
+      import Singularity.Geom.Knot;
+     
+      import Singularity.Events.SingularityEvent;
+
+      import Singularity.Interactive.PointSelector;
+      
+      import mx.core.UIComponent;
+      
+      import flash.display.Shape;
+      
+      private var COEF:Boolean         = false;
+      private var DE_CASTELJAU:Boolean = false;
+      
+      private var __bezier:Bezier      = new Bezier();       // Bezier curve of arbitrary degree
+      private var __count:uint         = 0;                  // count number of control points
+     
+      private var __knots:Array             = new Array();        // collection of Knot references
+      private var __connect:Shape           = new Shape();        // lines connecting the control points
+      private var __curve:Shape             = new Shape();        // bezier curve drawn in this Shape
+      private var __drawArea:PointSelector  = null;               // reference to point-selector
+      private var __myReference:UIComponent = new UIComponent();  // UIComponent reference
+      
+      public function test():void 
+      { 
+      	addChild(__myReference);
+        
+        // define drawing area - use top of normal button for bottom level
+        var drawX:uint = __status__.x;
+        var drawY:uint = __status__.y + __status__.height + 5;
+        var drawW:uint = __status__.width;
+        var drawH:uint = __draw__.y - drawY - 10;
+        
+        __drawArea = new PointSelector(drawX, drawY, drawW, drawH, 0xcccccc);
+        __drawArea.addEventListener(SingularityEvent.SELECTED, __onSelected);
+        
+        __myReference.addChild(__drawArea);
+        __myReference.addChild(__curve);
+        __myReference.addChild(__connect);
+        
+        __status__.text = "Click in draw area to define points, then click 'Draw Curve'.";
+      }
+      
+      private function __onKnotRollOver(_e:Event):void
+      {
+        // no action
+      }
+      
+      private function __onKnotRollOut(_e:SingularityEvent):void
+      {
+      	// no action
+      }
+      
+      private function __onKnotSelected(_e:Event):void
+      {
+      	// no action in this demo - alter as you see fit
+      }
+      
+      // point selected in draw area
+      private function __onSelected(_e:SingularityEvent):void
+      {
+      	var p:PointSelector = _e.target as PointSelector;
+      	
+      	var pX:uint = p.selectedX;
+      	var pY:uint = p.selectedY;
+      	
+        var knot:Knot = new Knot(6, 0xffcccc);
+        knot.addEventListener( SingularityEvent.ROLL_OVER, __onKnotRollOver );
+        knot.addEventListener( SingularityEvent.ROLL_OUT , __onKnotRollOut  );
+        knot.addEventListener( SingularityEvent.SELECTED , __onKnotSelected );
+        
+        __bezier.addControlPoint(pX,pY);
+        __knots.push(knot);
+        
+        knot.id = __count++;
+        knot.x  = pX;
+        knot.y  = pY;
+        
+        __myReference.addChild(knot);
+        
+        // curve can be drawn as soon as there are two points, but three is the minimum for this demo
+        if( __count == 3 )
+          __draw__.enabled = true;
+                	
+        if( __count == 1 )
+        {
+          __connect.graphics.lineStyle(0,0x000000);
+          __connect.graphics.moveTo(pX, pY);	
+        }
+        else
+        __connect.graphics.lineTo(pX, pY);
+      }
+      
+      private function __onDraw():void
+      {
+        __drawArea.disableXHair();
+            
+        __drawItBaby(0x0000ff, true); 
+            
+        __reset__.enabled = true;
+        __draw__.enabled  = false;
+        __coef__.enabled  = true;
+      }
+      
+      private function __drawItBaby(_color:int, _clear:Boolean):void
+      {
+        // draw curve with the specified color (set 'clear' to false to draw over previous curve)
+        var g:Graphics = __curve.graphics;
+      	if( _clear )
+      	  g.clear();
+      	  
+      	g.lineStyle(0,_color);
+      	var k:Knot = __knots[0];
+      	g.moveTo(__bezier.getX(0), __bezier.getY(0));
+      	
+      	var deltaT:Number = 0.0125;
+      	for( var t:Number=deltaT; t<=1.0; t+=deltaT )
+      	  g.lineTo(__bezier.getX(t), __bezier.getY(t)); 
+      }
+      
+      // NOTE:  Coefficient generation may reveal numerical issues in high-order curves (to be addressed in a future demo)
+      private function __onCoef():void
+      {
+      	// generate coefficients and redraw in a different color
+      	__bezier.useCoef = true;
+      	
+      	__drawItBaby(0xff0000, false);
+      }
+      
+      private function __onDecasteljau():void
+      {
+      	// to be implemented in the future
+      }
+      
+      private function __onReset():void
+      {
+      	// restore the application to its initial state, preparing for new control points
+      	__draw__.enabled  = false;
+      	__reset__.enabled = false;
+      	__dc__.enabled    = false;
+      	__coef__.enabled  = false;
+      	
+      	__status__.text = "Click in draw area to define points, then click 'Draw Curve'.";
+      	
+        __curve.graphics.clear();
+        __connect.graphics.clear();
+        __bezier.reset();
+        
+        for( var i:uint=0; i<__count; ++i )
+        {
+          __knots[i].destruct();
+          delete __knots[i];
+        }
+       
+        __knots.splice(0);
+        
+        __count = 0;
+        
+        __drawArea.enableXHair();
+      }
+    ]]>
+  </mx:Script>
+	
+</mx:Application>
+
+

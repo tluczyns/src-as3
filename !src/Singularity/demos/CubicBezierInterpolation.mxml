@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" width="550" height="500" applicationComplete="test();">
+  <mx:TextArea height="26" id="__status__" wordWrap="true" editable="false" top="10" left="23" right="22"/>
+  <mx:Button x="242" y="472" label="Reset" id="__reset__" enabled="false" click="onReset();"/>
+	
+	<mx:Script>
+    <![CDATA[
+    
+      // This program illustrates four-point interpolation with a cubic Bezier curve.
+      
+      import Singularity.Events.SingularityEvent;
+            
+      import Singularity.Geom.Bezier3;
+      import Singularity.Geom.Knot;
+     
+      import Singularity.Numeric.Consts;
+
+      import Singularity.Interactive.PointSelector;
+      
+      import mx.core.UIComponent;
+      
+      import flash.display.Shape;
+      import flash.display.Sprite;
+      import flash.events.MouseEvent;
+      
+      private var __cubic:Bezier3     = new Bezier3();            // cubic bezier curve
+      
+      private var __count:uint              = 0;                  // count number of control points
+      private var __points:Array            = new Array();        // contains four points to be interpolated
+      private var __connect:Shape           = new Shape();        // lines connecting the control points
+      private var __curve:Shape             = new Shape();        // bezier curve drawn in this shape
+      private var __knots:Sprite            = new Sprite();       // draw original knots
+      private var __control:Shape           = new Shape();        // lines connecting control points drawn here
+      private var __drawArea:PointSelector  = null;               // reference to point-selector
+      private var __myReference:UIComponent = new UIComponent();  // UIComponent reference
+      
+      // draw area
+      private var __drawX:uint = 0;
+      private var __drawY:uint = 0;
+      private var __drawW:uint = 0;
+      private var __drawH:uint = 0;
+        
+      private function test():void 
+      { 
+      	addChild(__myReference);
+      	        
+        __cubic.addEventListener(SingularityEvent.ERROR, errHandler);
+        __cubic.container = __curve;
+        
+        // define drawing area - use top of normal button for bottom level
+        __drawX = __status__.x;
+        __drawY = __status__.y + __status__.height + 5;
+        __drawW = __status__.width;
+        __drawH = __reset__.y - __drawY - 20;
+               
+        __drawArea = new PointSelector(__drawX, __drawY, __drawW, __drawH, 0xcccccc);
+        __drawArea.addEventListener(SingularityEvent.SELECTED, onSelected);
+                 
+        __myReference.addChild(__drawArea);
+        __myReference.addChild(__curve);
+        __myReference.addChild(__connect);
+        __myReference.addChild(__knots);
+        __myReference.addChild(__control);
+        
+        __status__.text = "Select four points in drawing area to interpolate.";
+      }
+      
+      private function errHandler(_e:Event):void
+      {
+      	__status__.text = _e.toString();
+      }
+      
+      private function onKnotRollOver(_e:Event):void
+      {
+        // no action in this demo
+      }
+      
+      private function onKnotRollOut(_e:SingularityEvent):void
+      {
+        // no action in this demo
+      }
+      
+      private function onKnotSelected(_e:Event):void
+      {
+      	// no action currently taken
+      }
+      
+      private function onSelected(_e:SingularityEvent):void
+      {
+      	var p:PointSelector = PointSelector(_e.target);
+      	
+      	var pX:uint = p.selectedX;
+      	var pY:uint = p.selectedY;
+      	
+        __points[__count] = { X:pX, Y:pY };
+       	 
+      	var knot:Knot = new Knot(6, 0xffcccc);
+        knot.id       = __count;
+        knot.x        = pX;
+        knot.y        = pY;
+        
+        __knots.addChild(knot);
+      	 
+      	if( __count == 3 )
+      	{ 
+      	  __drawArea.disableXHair();
+            
+          var g:Graphics = __connect.graphics;
+          g.lineStyle(0,0x000000);
+          g.lineTo(pX,pY);
+            
+          __reset__.enabled = true;
+          
+          __cubic.interpolate(__points);
+          
+          // show control cage for cubic Bezier in red
+          g = __control.graphics;
+          g.lineStyle(1, 0xff0000);
+          var c:Point = __cubic.getControlPoint(0);
+          g.moveTo(c.x, c.y);
+          
+          c = __cubic.getControlPoint(1);
+          g.lineTo(c.x, c.y);
+          
+          c = __cubic.getControlPoint(2);
+          g.lineTo(c.x, c.y);
+          
+          c = __cubic.getControlPoint(3);
+          g.lineTo(c.x, c.y);
+          
+          __cubic.draw(1);
+           
+          __reset__.enabled  = true;
+        }
+        else
+        {
+          g = __connect.graphics;
+          g.lineStyle(0,0x000000);
+          
+          if( __count == 0 )
+            g.moveTo(pX,pY);
+          else
+          {  
+            g.lineTo(pX,pY);
+          }
+        }
+        
+        __count++;
+      }
+      
+      private function onReset():void
+      {
+        __reset__.enabled = false;
+      	
+        var g:Graphics = __curve.graphics;
+        g.clear();
+        
+        // Completely clean out the knot set, preparing for a new set
+        for( var i:uint=0; i<4; ++i )
+        {
+          var k:Knot = __knots.removeChildAt(0) as Knot;
+          k.destruct();
+        }
+        
+        g = __connect.graphics;
+        g.clear();
+        
+        g = __control.graphics;
+        g.clear();
+        
+        __cubic.reset();
+        
+        __count = 0;
+        __drawArea.enableXHair();
+        __status__.text = "Select four points in drawing area to interpolate.";
+      }
+      
+    ]]>
+  </mx:Script>
+	
+</mx:Application>
+

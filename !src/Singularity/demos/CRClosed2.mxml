@@ -1,0 +1,285 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" applicationComplete="test()" width="600" height="500">
+  <mx:TextArea height="26" id="__status__" wordWrap="true" editable="false" top="10" left="23" right="22"/>
+  <mx:Button x="23" y="468" label="Animate" id="__animate__" enabled="true" click="onAnimate()"/>
+	
+	<mx:Script>
+    <![CDATA[
+      import Singularity.Geom.CatmullRom;
+      import Singularity.Numeric.Consts;
+      import Singularity.Geom.Knot;
+     
+      import Singularity.Events.SingularityEvent;
+      
+      import mx.core.UIComponent;
+      
+      import flash.display.Shape;
+      import flash.display.Sprite;
+      
+      // catmull-rom spline (crs) namespace
+      public namespace crs;
+      
+      crs var __spline:CatmullRom       = new CatmullRom();   // parametric spline reference
+      crs var __count:uint              = 0;                  // count number of control points
+      crs var __markers:Array           = new Array();        // collection at markers distributed along spline
+      crs var __controlPoints:Array     = new Array();        // array of control points
+      crs var __s:Array                 = new Array();        // arc-length parameter for each sprite
+      crs var __delta:Number            = 0.05;               // delta arc length
+      
+      public namespace ui;
+
+      ui var __curve:Shape              = new Shape();        // curve drawn in this Shape
+      ui var __approx:Shape             = new Shape();        // CR-approximation 
+      ui var __plotMarkers:Sprite       = new Sprite();       // markers drawn here
+      ui var __myReference:UIComponent  = new UIComponent();  // UIComponent reference
+      ui var __stage:Stage              = null;               // Stage reference
+      ui var __alpha:Array              = new Array();        // Alpha values of each sprite
+      ui var __counter:uint             = 0;                  // counts sprite number
+     
+      // these parameters control curve shape and center 
+      ui var __xC:Number  = 0;                                // x-coordinate of Lemniscate center
+      ui var __yC:Number  = 0;                                // y-coordinate of Lemniscate center
+      ui var __a:Number   = 150;                              // a-parameter
+      ui var __asQ:Number = ui::__a*ui::__a;                  // a squared
+      ui var __r:Number   = 0;                                // radius for polar coordinates
+      
+      public function test():void
+      { 
+      	addChild(ui::__myReference);
+      	        
+      	// spline is sampled, not drawn, so there is no curve reference as there are no calls to the draw() method
+        crs::__spline.addEventListener(SingularityEvent.ERROR, errHandler);
+        crs::__spline.closed       = true;
+        crs::__spline.parameterize = Consts.ARC_LENGTH;  // arc-length parameterization is critical for smooth motion
+        
+        ui::__plotMarkers.visible = false;
+        for( var i:uint=0; i<10; ++i )
+        {
+          var knot:Knot     = new Knot(8, 0xccffcc);
+          crs::__markers[i] = knot;
+          ui::__plotMarkers.addChild(knot);
+        }
+        
+        ui::__myReference.addChild(ui::__curve);
+        ui::__myReference.addChild(ui::__approx);
+        ui::__myReference.addChild(ui::__plotMarkers);
+        
+        // stage reference and center of curve
+        ui::__stage = ui::__myReference.stage;
+        ui::__xC    = 0.5*ui::__stage.width;
+      	ui::__yC    = 0.5*ui::__stage.height;
+        
+        // generate the C-R control points used to approximate the Lemniscate of Bernoulli
+        generateControlPoints();
+        
+        __status__.text = "Click Animate button to begin path animation.";
+      }
+      
+      public function errHandler(_e:Event):void
+      {
+      	__status__.text = _e.toString();
+      }
+      
+      public function onKnotRollOver(_e:Event):void
+      {
+        __status__.text = "Knot: " + _e.target.id;
+      }
+      
+      public function onKnotRollOut(_e:SingularityEvent):void
+      {
+
+      }
+      
+      public function onKnotSelected(_e:Event):void
+      {
+ 
+      }
+      
+      public function generateControlPoints():void
+      {
+      	// principal range [0,pi/4]
+      	crs::__spline.addControlPoint(ui::__xC+ui::__a, ui::__yC);
+        crs::__controlPoints[0] = {X:ui::__xC+ui::__a, Y:ui::__yC};
+      	
+      	var theta:Number = Math.PI/16;
+      	ui::__r          = Math.sqrt(ui::__asQ*Math.cos(2*theta));
+      	var x:Number     = ui::__xC + ui::__r*Math.cos(theta);
+      	var y:Number     = ui::__yC + ui::__r*Math.sin(theta);
+      	
+      	crs::__controlPoints[1] = {X:x, Y:y};
+      	crs::__spline.addControlPoint(x,y);
+      	
+      	theta   = Math.PI/6;
+      	ui::__r = Math.sqrt(ui::__asQ*Math.cos(2*theta));
+      	x       = ui::__xC + ui::__r*Math.cos(theta);
+      	y       = ui::__yC + ui::__r*Math.sin(theta);
+      	
+      	crs::__controlPoints[2] = {X:x, Y:y};
+        crs::__spline.addControlPoint(x,y);
+        
+        theta   = Math.PI/4.5;
+      	ui::__r = Math.sqrt(ui::__asQ*Math.cos(2*theta));
+      	x       = ui::__xC + ui::__r*Math.cos(theta);
+      	y       = ui::__yC + ui::__r*Math.sin(theta);
+      	
+      	crs::__controlPoints[3] = {X:x, Y:y};
+        crs::__spline.addControlPoint(x,y);
+      	
+      	crs::__controlPoints[4] = {X:ui::__xC, Y:ui::__yC};
+        crs::__spline.addControlPoint(ui::__xC, ui::__yC);
+        
+        // generate remaining markers from principal set
+        var p:Object            = crs::__controlPoints[3];
+      	crs::__controlPoints[5] = {X:2*ui::__xC - p.X, Y:2*ui::__yC - p.Y};
+      	p                       = crs::__controlPoints[5];
+      	
+      	crs::__spline.addControlPoint(p.X, p.Y);
+        
+        p                       = crs::__controlPoints[2];
+      	crs::__controlPoints[6] = {X:2*ui::__xC - p.X, Y:2*ui::__yC - p.Y};
+      	p                       = crs::__controlPoints[6];
+      	
+      	crs::__spline.addControlPoint(p.X, p.Y);
+        
+        p                       = crs::__controlPoints[1];
+        crs::__controlPoints[7] = {X:2*ui::__xC - p.X, Y:2*ui::__yC - p.Y};
+      	p                       = crs::__controlPoints[7];
+      	
+      	crs::__spline.addControlPoint(p.X, p.Y);
+      	
+      	crs::__controlPoints[8] = {X:ui::__xC - ui::__a, Y:ui::__yC};
+      	p                       = crs::__controlPoints[8];
+      	
+      	crs::__spline.addControlPoint(p.X, p.Y);
+     	
+      	p                       = crs::__controlPoints[7];
+      	crs::__controlPoints[9] = {X:p.X, Y:2*ui::__yC - p.Y};
+      	p                       = crs::__controlPoints[9];
+      	
+      	crs::__spline.addControlPoint(p.X, p.Y);
+      	
+      	p                        = crs::__controlPoints[6];
+      	crs::__controlPoints[10] = {X:p.X, Y:2*ui::__yC - p.Y};
+      	p                        = crs::__controlPoints[10];
+      	
+      	crs::__spline.addControlPoint(p.X, p.Y);
+      	
+        p                        = crs::__controlPoints[5];
+      	crs::__controlPoints[11] = {X:p.X, Y:2*ui::__yC - p.Y};
+      	p                        = crs::__controlPoints[11];
+      	
+      	crs::__spline.addControlPoint(p.X, p.Y);
+      	
+        crs::__controlPoints[12] = {X:ui::__xC, Y:ui::__yC};
+        p                        = crs::__controlPoints[12];
+      	
+      	crs::__spline.addControlPoint(p.X, p.Y);
+      	
+      	p                        = crs::__controlPoints[3];
+      	crs::__controlPoints[13] = {X:p.X, Y:2*ui::__yC - p.Y};
+      	p                        = crs::__controlPoints[13];
+      	
+      	crs::__spline.addControlPoint(p.X, p.Y);
+      	
+      	p                        = crs::__controlPoints[2];
+      	crs::__controlPoints[14] = {X:p.X, Y:2*ui::__yC - p.Y};
+      	p                        = crs::__controlPoints[14];
+      	
+      	crs::__spline.addControlPoint(p.X, p.Y);
+      	
+	    p                        = crs::__controlPoints[1];
+      	crs::__controlPoints[15] = {X:p.X, Y:2*ui::__yC - p.Y};
+      	p                        = crs::__controlPoints[15];
+      	 
+      	crs::__spline.addControlPoint(p.X, p.Y);
+      }
+      
+      public function onAnimate():void
+      {
+      	__animate__.enabled = false;
+      	
+      	for( var i:uint=0; i<10; ++i )
+      	{
+      	  crs::__s[i]    = 0;
+      	  
+      	  var k:Knot     = crs::__markers[i];
+      	  k.x            = ui::__xC+ui::__a;
+      	  k.y            = ui::__yC;
+      	  k.visible      = true;
+      	  k.alpha        = 1;
+      	  ui::__alpha[i] = 1;
+      	} 
+      	
+      	ui::__counter             = 0;
+      	ui::__plotMarkers.visible = true;
+      	  
+      	ui::__stage.addEventListener(Event.ENTER_FRAME, animateKnots);
+      }
+      
+      public function animateKnots(_e:Event):void
+      {
+      	if( ui::__counter < 10 )
+      	{
+      	  // prime the pump - use this loop to control the initial placement and alpha out of the starting point.
+      	  for( var i:uint=0; i<=ui::__counter; ++i )
+      	  {
+      	    var k:Knot   = crs::__markers[i];
+      	    var s:Number = crs::__s[i];
+      	    s           += crs::__delta;
+     
+            var myAlpha:Number = ui::__alpha[i];
+            myAlpha            = Math.max(myAlpha-0.1,0);
+            k.x                = crs::__spline.getX(s);
+            k.y                = crs::__spline.getY(s);
+            k.alpha            = myAlpha;
+            
+            crs::__s[i]    = s;
+            ui::__alpha[i] = myAlpha;
+          }
+          
+          ui::__counter++;
+        }
+        else
+        {
+          // complete the motion here.  Lots of flexibility to experiment or even merge the two paths if you desire
+          for( i=0; i<10; ++i )
+      	  {
+      	    k = crs::__markers[i];
+      	    s = crs::__s[i];
+      	    if( s <= 1 )
+      	    {
+      	      s += crs::__delta;
+     
+              myAlpha = ui::__alpha[i] - 0.1;
+              myAlpha = myAlpha < 0 ? 1 : myAlpha;
+              k.x     = crs::__spline.getX(s);
+              k.y     = crs::__spline.getY(s);
+              k.alpha = myAlpha;
+            
+              crs::__s[i]    = s;
+              ui::__alpha[i] = myAlpha;
+            }
+            else
+            {
+              k.visible = false;
+              
+              // last sprite finished?
+              if( i == 9 )
+              {
+                __animate__.enabled = true;
+                __status__.text     = "Click Animate button to begin path animation.";
+                ui::__stage.removeEventListener(Event.ENTER_FRAME, animateKnots);
+              }
+            }
+          }
+        }
+      }
+      
+    ]]>
+  </mx:Script>
+	
+</mx:Application>
+
+
+
+

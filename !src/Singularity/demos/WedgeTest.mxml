@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" width="500" height="400" applicationComplete="test()" >
+	<mx:HSlider x="136" y="365" id="__slider__" minimum="0" maximum="360" enabled="true" width="228" thumbRelease="onSliderRelease()" change="onSliderChange(event)" liveDragging="true"/>
+	<mx:TextArea height="38" id="__status__" wordWrap="true" editable="false" top="10" left="23" right="22" fontSize="10"/>
+	
+	<mx:Script>
+    <![CDATA[
+      import Singularity.Events.SingularityEvent;
+      import Singularity.Numeric.Consts;
+      
+      import Singularity.Geom.Wedge;
+      import Singularity.Interactive.PointSelector;
+      
+      import mx.controls.sliderClasses.Slider;
+      import mx.core.UIComponent;
+      import mx.events.SliderEvent;
+      
+      import flash.display.Shape;
+      import flash.display.Sprite;
+      import flash.events.MouseEvent;
+      
+      // ui (ui) namespace
+      public namespace ui;
+      
+      ui var __count:uint              = 0;                  // count number of points
+      ui var __draw:Shape              = new Shape();        // wedge drawn in this Shape
+      ui var __line:Shape              = new Shape();        // dynamically drawn line from origin point to current mouse
+      ui var __drawArea:PointSelector  = null;               // reference to point-selector
+      ui var __wedge:Wedge             = null;               // reference to Wedge
+      ui var __startAngle:Number       = 0;                  // start angle
+      ui var __curAngle:Number         = Math.PI/8;          // current end angle
+      ui var __myReference:UIComponent = new UIComponent();  // UIComponent reference
+      
+      // initial point of Wedge
+      ui var __x0:uint;
+      ui var __y0:uint;
+      
+      ui var __stage:Stage = null;
+      
+      public function test():void 
+      { 
+      	addChild(ui::__myReference);
+        
+        // define drawing area - use top of normal button for bottom level
+        var drawX:uint = __status__.x;
+        var drawY:uint = __status__.y + __status__.height + 5;
+        var drawW:uint = __status__.width;
+        var drawH:uint = __slider__.y - drawY - 10;
+        
+        ui::__drawArea = new PointSelector(drawX, drawY, drawW, drawH, 0xcccccc);
+        ui::__drawArea.addEventListener(SingularityEvent.SELECTED, onSelected);
+        
+        ui::__myReference.addChild(ui::__drawArea);
+        ui::__myReference.addChild(ui::__draw);  
+        ui::__myReference.addChild(ui::__line);  
+
+        ui::__stage = ui::__line.stage;   
+        
+        __status__.text = "Select two points - first is center of wedge, second determines radius and initial angle.";
+      }
+      
+      public function errHandler(_e:Event):void
+      {
+      	__status__.text = _e.toString();
+      }
+      
+      public function trackMouse(_e:MouseEvent):void
+      { 
+        var g:Graphics = ui::__line.graphics;
+        g.clear();
+        g.lineStyle(1,0x000000);
+        g.moveTo(ui::__x0,ui::__y0);    	
+        g.lineTo(_e.localX,_e.localY);  
+      }
+      
+      public function onSliderChange(_e:SliderEvent):void
+      {
+      	// range is 0 to 2PI relative to starting angle
+      	__status__.text  = "";
+        var angle:Number = __slider__.value*Consts.DEG_TO_RAD;
+        
+        ui::__wedge.endAngle = ui::__startAngle+angle;
+        ui::__wedge.draw(ui::__draw, 1, 0x0000ff, 0xccccff, 0.5);
+      }
+      
+      public function onSliderRelease():void
+      {
+        __status__.text = "Move slider to change wedge angle.";
+      }
+      
+      public function onSelected(_e:SingularityEvent):void
+      {
+      	var p:PointSelector = PointSelector(_e.target);
+
+      	var pX:uint = p.selectedX;
+      	var pY:uint = p.selectedY;
+      	
+      	if( ui::__count == 0 )
+      	{
+          ui::__stage.addEventListener(MouseEvent.MOUSE_MOVE, trackMouse);
+        
+          ui::__x0 = pX;
+          ui::__y0 = pY;
+        }
+        else
+        {
+          p.disableXHair();
+          ui::__stage.removeEventListener(MouseEvent.MOUSE_MOVE, trackMouse);
+          
+          var g:Graphics = ui::__line.graphics;
+          g.clear();  
+          
+          var x0:Number = Number(ui::__x0);
+          var y0:Number = Number(ui::__y0);
+          var x1:Number = Number(pX);
+          var y1:Number = Number(pY);
+          
+          var dX:Number    = x1-x0;
+          var dY:Number    = y1-y0;
+          var r:Number     = Math.sqrt(dX*dX + dY*dY);
+          
+          ui::__startAngle = Math.atan2(dY,dX);
+          
+          // init slider value to delta angle
+          __slider__.value = ui::__curAngle*Consts.RAD_TO_DEG;
+          
+          ui::__curAngle  += ui::__startAngle;
+          ui::__wedge      = new Wedge(r, x0, y0, ui::__startAngle, ui::__curAngle );
+          
+          ui::__wedge.draw(ui::__draw, 1, 0x0000ff, 0xccccff, 0.5);
+          
+          __slider__.enabled = true;
+          __status__.text    = "Move slider to change wedge angle.";
+        }
+        ui::__count++;
+      }
+      
+    ]]>
+  </mx:Script>
+  
+</mx:Application>

@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" applicationComplete="test()" width="800" height="600">
+  <mx:TextArea height="32" id="__status__" wordWrap="true" editable="false" top="10" left="23" right="22"/>
+  <mx:Label x="23" y="549" text="COM Controls" color="#ffffff" id="__comLabel__"/>
+  <mx:Button x="23" y="570" label="Select" id="__comSelect__" click="comSelect()" enabled="false"/>
+  <mx:Button x="96" y="570" label="Unselect" id="__comUnselect__" click="comUnselect()" enabled="false"/>
+  <mx:Button x="182" y="570" label="Move" id="__move__" click="comMove()" enabled="false"/>
+  <mx:Button x="248" y="570" label="Rotate" id="__comRotate__" enabled="false" click="comRotate()"/>
+  <mx:HSlider x="546" y="576" id="__angle__" allowTrackClick="false" minimum="0" maximum="360" enabled="false" thumbRelease="onSliderRelease()" change="onAngleChange(event)" liveDragging="true"/>
+  <mx:Label x="546" y="560" color="#ffffff" id="__label__" enabled="false" width="245"/>
+	
+	<mx:Script>
+    <![CDATA[
+      import Singularity.Events.SingularityEvent;
+      import Singularity.Interactive.RectangleSelector;
+      import Singularity.Numeric.Consts;
+      
+      import Singularity.Rigs.BaseBone;
+      import Singularity.Rigs.Connector;
+      import Singularity.Rigs.Biped;
+
+      import mx.controls.sliderClasses.Slider;
+      import mx.core.UIComponent;
+      import mx.events.SliderEvent;
+ 
+      // rig (rig) namespace
+      public namespace rig;
+      
+      rig var __biped:Biped = null;
+      
+      // user-interface (ui) namespace
+      public namespace ui;
+      ui var __drawArea:RectangleSelector = null;               // reference to rectangle-selector
+      ui var __myReference:UIComponent    = new UIComponent();  // UIComponent reference
+      ui var __stage:Stage                = null;               // Stage reference
+      
+      public function test():void 
+      { 
+      	addChild(ui::__myReference);
+      
+        // define drawing area 
+        var drawX:uint = __status__.x;
+        var drawY:uint = __status__.y + __status__.height + 5;
+        var drawW:uint = __status__.width;
+        var drawH:uint = __comLabel__.y - drawY - 10;
+        
+        ui::__drawArea = new RectangleSelector(drawX, drawY, drawW, drawH, 0xcccccc, true);
+        ui::__drawArea.addEventListener(SingularityEvent.COMPLETE, onRectangleComplete);
+        
+        ui::__myReference.addChild(ui::__drawArea);
+
+        __status__.text = "Drag a rectangle to define Biped boundary";
+      }
+      
+      public function errHandler(_e:Event):void
+      {
+      	__status__.text = _e.toString();
+      }
+      
+      // low-level interactivity
+      public function onInteract(_b:Biped):void
+      {
+        var selected:Object = _b.selected;
+        switch( _b.mouseEvent )
+        {
+          case BaseBone.BONE_ROLL_OVER :
+            __status__.text = selected.NAME;
+          break;
+          
+          case BaseBone.BONE_ROLL_OUT :
+            __status__.text = "";
+          break;
+   
+          case BaseBone.BONE_SELECTED :
+            __status__.text = "Selected: " + selected.NAME;
+          break;
+        }
+      }
+     
+      public function onRectangleComplete(_e:SingularityEvent):void
+      {
+        if( rig::__biped == null )
+        {
+          // make sure future mouse clicks are not interpreted as 1x1 rectangles and re-initialize the Biped :)
+      	  ui::__drawArea.disable();
+      	  ui::__drawArea.removeEventListener(SingularityEvent.COMPLETE, onRectangleComplete);
+
+          var s:RectangleSelector = RectangleSelector(_e.target);
+          var w:uint              = s.xRight - s.xLeft;
+          var h:uint              = s.yRight - s.yLeft;
+
+          rig::__biped = new Biped(s.xLeft, s.yLeft, w, h);
+          rig::__biped.addEventListener(SingularityEvent.ERROR, errHandler);
+          rig::__biped.setNotify(onInteract);
+        
+          // all biped limbs are renderable, but not enabled by default.  
+          rig::__biped.draw();
+        
+          // enable interactivity with the entire Biped
+          rig::__biped.enabled = true;
+        
+          ui::__myReference.addChild(rig::__biped);
+          ui::__stage = rig::__biped.stage;
+        
+          __comSelect__.enabled = true;
+        }
+      }
+      
+      public function comSelect():void
+      {
+        rig::__biped.selectCOM(true);
+        
+        __move__.enabled        = true;
+        __comRotate__.enabled   = true;
+        __comUnselect__.enabled = true;
+        __comSelect__.enabled   = false;
+      }
+      
+      public function comUnselect():void
+      {
+        rig::__biped.selectCOM(false);
+        
+        __move__.enabled        = false;
+        __comRotate__.enabled   = false;
+        __comUnselect__.enabled = false;
+        __comSelect__.enabled   = true;
+      }
+      
+      public function comMove():void
+      {
+        __move__.enabled = false;
+        __status__.text  = "Click anywhere in draw area to move Biped COM";
+      	ui::__stage.addEventListener(MouseEvent.CLICK, onMove, true);
+      }
+      
+      public function comRotate():void
+      {
+      	__label__.enabled = true;
+      	__angle__.enabled = true;
+        var angle:Number  = rig::__biped.orientation*Consts.RAD_TO_DEG;
+        __label__.text    = "Initial COM Rotation Angle: " + Math.round(angle).toString();
+          
+        __angle__.value       = angle;
+        __comRotate__.enabled = false;
+      }
+      
+      // process COM move
+      public function onMove(_e:MouseEvent):void
+      {	
+        ui::__stage.removeEventListener(MouseEvent.CLICK, onMove, true);
+      	rig::__biped.move(_e.localX,_e.localY);
+      	
+      	__move__.enabled      = true;
+        __comRotate__.enabled = true;
+      }
+      
+      // process orientation changes from the slider
+      public function onAngleChange(_e:SliderEvent):void
+      {
+        rig::__biped.rotate( __angle__.value*Consts.DEG_TO_RAD );
+      }
+      
+      public function onSliderRelease():void
+      {
+      	__label__.enabled     = false;
+      	__angle__.enabled     = false;
+        __comRotate__.enabled = true;
+      }
+    ]]>
+  </mx:Script>
+
+</mx:Application>
+
